@@ -70,17 +70,8 @@ func TestInit(t *testing.T) {
 		t.Fatalf("VersionNum() expected >= %d; got %d", minVersion, v)
 	}
 
-	// Direct open/close
+	// Open/Close
 	closeConn(t, openConn(t, ":memory:"))
-
-	// Driver open/close
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil || db == nil {
-		t.Fatalf("sql.Open() unexpected error: %v", err)
-	}
-	if err = db.Close(); err != nil {
-		t.Fatalf("db.Close() unexpected error: %v", err)
-	}
 
 	// Check of assumptions for Stmt.Params()
 	unnamedVars := []string{}
@@ -343,7 +334,6 @@ func TestParams(t *testing.T) {
 
 func TestIO(t *testing.T) {
 	checkSkip(t)
-	defer skipIfFailed(t)
 
 	c := openConn(t, ":memory:")
 	defer closeConn(t, c)
@@ -425,7 +415,6 @@ func TestIO(t *testing.T) {
 
 func TestBackup(t *testing.T) {
 	checkSkip(t)
-	defer skipIfFailed(t)
 
 	c1, c2 := openConn(t, ":memory:"), openConn(t, ":memory:")
 	defer closeConn(t, c1)
@@ -462,4 +451,68 @@ func TestBackup(t *testing.T) {
 	if want := "hello, world"; have != want {
 		t.Fatalf("Row 2 expected %q; got %q", want, have)
 	}
+}
+
+func TestDriver(t *testing.T) {
+	checkSkip(t)
+
+	// Open
+	c, err := sql.Open("sqlite3", ":memory:")
+	if err != nil || c == nil {
+		t.Fatalf("sql.Open() unexpected error: %v", err)
+	}
+	defer func() {
+		if err = c.Close(); err != nil {
+			t.Fatalf("c.Close() unexpected error: %v", err)
+		}
+	}()
+
+	// Create table
+	sql := "CREATE TABLE x(a, b, c)"
+	r, err := c.Exec(sql)
+	if err != nil {
+		t.Fatalf("c.Exec(%q) unexpected error: %v", sql, err)
+	}
+	if id, err := r.LastInsertId(); id != 0 || err != nil {
+		t.Fatalf("r.LastInsertId() expected 0, <nil>; got %d, %v", id, err)
+	}
+	if n, err := r.RowsAffected(); n != 0 || err != nil {
+		t.Fatalf("r.RowsAffected() expected 0, <nil>; got %d, %v", n, err)
+	}
+
+	// Insert
+	sql = "INSERT INTO x VALUES(?, ?, ?)"
+	r, err = c.Exec(sql, 1, 2.2, "test")
+	if err != nil {
+		t.Fatalf("c.Exec(%q) unexpected error: %v", sql, err)
+	}
+	if id, err := r.LastInsertId(); id != 1 || err != nil {
+		t.Fatalf("r.LastInsertId() expected 1, <nil>; got %d, %v", id, err)
+	}
+	if n, err := r.RowsAffected(); n != 1 || err != nil {
+		t.Fatalf("r.RowsAffected() expected 1, <nil>; got %d, %v", n, err)
+	}
+
+	// Prepare
+	sql = "INSERT INTO x VALUES(?, ?, ?)"
+	s, err := c.Prepare(sql)
+	if err != nil {
+		t.Fatalf("c.Prepare(%q) unexpected error: %v", sql, err)
+	}
+
+	// Statement reuse
+	r, err = s.Exec(3, 4, 5)
+	if err != nil {
+		t.Fatalf("s.Exec(%q) unexpected error: %v", sql, err)
+	}
+	defer s.Close()
+
+	if id, err := r.LastInsertId(); id != 2 || err != nil {
+		t.Fatalf("r.LastInsertId() expected 1, <nil>; got %d, %v", id, err)
+	}
+	if n, err := r.RowsAffected(); n != 1 || err != nil {
+		t.Fatalf("r.RowsAffected() expected 1, <nil>; got %d, %v", n, err)
+	}
+
+	// TODO: Not finished...
 }

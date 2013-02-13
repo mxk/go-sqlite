@@ -12,6 +12,7 @@ import "C"
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"reflect"
 	"unsafe"
 )
@@ -120,6 +121,17 @@ var (
 	ErrBadIO     = &Error{MISUSE, "closed or invalid incremental I/O operation"}
 	ErrBadBackup = &Error{MISUSE, "closed or invalid backup operation"}
 )
+
+// Shell runs the command-line shell that is normally accessed with the sqlite3
+// command. The usual command-line arguments are passed in args. On Windows, the
+// shell is compiled into the package. On *nix, exec.LookPath is used to locate
+// the sqlite3 binary, which is executed as a separate process. The shell's exit
+// status is returned (0 = normal exit).
+// [http://www.sqlite.org/sqlite.html]
+func Shell(args ...string) int {
+	args = append([]string{os.Args[0]}, args...)
+	return shell(args) // implemented in sqlite3_{windows,unix}.go
+}
 
 // Complete returns true if sql appears to contain a complete statement that is
 // ready to be parsed. This does not validate the statement syntax.

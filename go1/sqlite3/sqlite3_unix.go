@@ -16,6 +16,33 @@ package sqlite3
 */
 import "C"
 
+import (
+	"os"
+	"os/exec"
+	"syscall"
+)
+
+// shell executes the sqlite3 command with the specified arguments.
+func shell(args []string) int {
+	path, err := exec.LookPath("sqlite3")
+	if err != nil {
+		return 127 // sqlite3 not found
+	}
+	cmd := exec.Command(path)
+	cmd.Args = args
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			return exit.ProcessState.Sys().(syscall.WaitStatus).ExitStatus()
+		}
+		return 127
+	}
+	return 0
+}
+
 // errstr is a temporary replacement for sqlite3_errstr, which was added in
 // SQLite 3.7.15 and may not be available on most *nix systems as of 2013-02-11.
 func errstr(rc C.int) string {
