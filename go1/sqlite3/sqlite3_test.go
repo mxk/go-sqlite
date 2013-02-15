@@ -302,10 +302,10 @@ func TestParams(t *testing.T) {
 
 	// Verify
 	table := []RowMap{
-		RowMap{"rowid": int64(1), "a": int64(1), "b": int64(2), "c": int64(3)},
-		RowMap{"rowid": int64(2), "a": 1.1, "b": 2.2, "c": 3.3},
-		RowMap{"rowid": int64(3), "a": "a", "b": "b", "c": "c"},
-		RowMap{"rowid": int64(4), "a": []byte("X"), "b": []byte("Y"), "c": nil},
+		{"rowid": int64(1), "a": int64(1), "b": int64(2), "c": int64(3)},
+		{"rowid": int64(2), "a": 1.1, "b": 2.2, "c": 3.3},
+		{"rowid": int64(3), "a": "a", "b": "b", "c": "c"},
+		{"rowid": int64(4), "a": []byte("X"), "b": []byte("Y"), "c": nil},
 	}
 	have := make(RowMap)
 	for i, want := range table {
@@ -565,8 +565,8 @@ func TestDriver(t *testing.T) {
 
 	// Verify
 	table := [][]interface{}{
-		[]interface{}{int64(1), int64(1), float64(2.2), []byte("test")},
-		[]interface{}{int64(2), int64(3), []byte{4}, nil},
+		{int64(1), int64(1), float64(2.2), []byte("test")},
+		{int64(2), int64(3), []byte{4}, nil},
 	}
 	for i, want := range table {
 		if !rows.Next() {
