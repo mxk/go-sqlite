@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"io"
 	"reflect"
+	"runtime"
 	"testing"
 
 	. "code.google.com/p/go-sqlite/go1/sqlite3"
@@ -20,6 +21,9 @@ const minVersion = 3007014
 // skip causes all remaining tests to be skipped when set to true.
 var skip = false
 
+// thisFile is used by close to detect when it is called as a deferred function.
+var thisFile string
+
 // Test control functions.
 func checkSkip(t *testing.T) {
 	if skip {
@@ -31,31 +35,20 @@ func skipIfFailed(t *testing.T) {
 }
 
 // Object control functions.
-func openConn(t *testing.T, name string) *Conn {
+func open(t *testing.T, name string) *Conn {
 	c, err := Open(name)
 	if err != nil || c == nil {
 		t.Fatalf("Open(%q) unexpected error: %v", name, err)
 	}
 	return c
 }
-func closeConn(t *testing.T, c *Conn) {
+func close(t *testing.T, c io.Closer) {
+	_, file, line, _ := runtime.Caller(1)
+	if file != thisFile {
+		line = 0 // Called as a deferred function
+	}
 	if err := c.Close(); err != nil {
-		t.Fatalf("c.Close() unexpected error: %v", err)
-	}
-}
-func closeStmt(t *testing.T, s *Stmt) {
-	if err := s.Close(); err != nil {
-		t.Fatalf("s.Close() unexpected error: %v", err)
-	}
-}
-func closeBackup(t *testing.T, b *Backup) {
-	if err := b.Close(); err != nil {
-		t.Fatalf("b.Close() unexpected error: %v", err)
-	}
-}
-func closeBlobIO(t *testing.T, b *BlobIO) {
-	if err := b.Close(); err != nil {
-		t.Fatalf("b.Close() unexpected error: %v", err)
+		t.Fatalf("(%T).Close() [line %d] unexpected error: %v", c, line, err)
 	}
 }
 
@@ -71,7 +64,8 @@ func TestInit(t *testing.T) {
 	}
 
 	// Open/Close
-	closeConn(t, openConn(t, ":memory:"))
+	_, thisFile, _, _ = runtime.Caller(0)
+	close(t, open(t, ":memory:"))
 
 	// Check of assumptions for Stmt.Params()
 	unnamedVars := []string{}
@@ -84,8 +78,8 @@ func TestBasic(t *testing.T) {
 	checkSkip(t)
 	defer skipIfFailed(t)
 
-	c := openConn(t, ":memory:")
-	defer closeConn(t, c)
+	c := open(t, ":memory:")
+	defer close(t, c)
 
 	// Connection information
 	if !c.AutoCommit() {
@@ -109,7 +103,7 @@ func TestBasic(t *testing.T) {
 	}
 
 	// Query
-	sql = `SELECT * FROM x`
+	sql = `SELECT * FROM x ORDER BY rowid`
 	if c.Exec(sql, 42) == nil {
 		t.Fatalf("c.Exec(%q, 42) expected an error", sql)
 	}
@@ -117,7 +111,7 @@ func TestBasic(t *testing.T) {
 	if err != nil || s == nil {
 		t.Fatalf("c.Query(%q) unexpected error: %v", sql, err)
 	}
-	defer closeStmt(t, s)
+	defer close(t, s)
 
 	// Statement information
 	if s.Conn() != c {
@@ -212,7 +206,7 @@ func TestBasic(t *testing.T) {
 	}
 
 	// Close
-	closeStmt(t, s)
+	close(t, s)
 	if s.Conn() != c {
 		t.Fatalf("s.Conn() expected %v; got %v", c, s.Conn())
 	}
@@ -225,8 +219,8 @@ func TestParams(t *testing.T) {
 	checkSkip(t)
 	defer skipIfFailed(t)
 
-	c := openConn(t, ":memory:")
-	defer closeConn(t, c)
+	c := open(t, ":memory:")
+	defer close(t, c)
 
 	// Setup
 	sql := `CREATE TABLE x(a, b, c)`
@@ -240,7 +234,7 @@ func TestParams(t *testing.T) {
 	if err != nil || s == nil {
 		t.Fatalf("c.Prepare(%q) unexpected error: %v", sql, err)
 	}
-	defer closeStmt(t, s)
+	defer close(t, s)
 
 	// Parameter information
 	if s.NumParams() != 3 {
@@ -261,7 +255,7 @@ func TestParams(t *testing.T) {
 		t.Fatalf("s.Exec(NamedArgs{}) expected an error")
 	}
 
-	// Multiple executions
+	// Multiple inserts
 	if err := s.Exec(1, 2, 3); err != nil {
 		t.Fatalf("s.Exec(1, 2, 3) unexpected error: %v", err)
 	}
@@ -275,7 +269,7 @@ func TestParams(t *testing.T) {
 	if err != nil || s == nil {
 		t.Fatalf("c.Prepare(%q) unexpected error: %v", sql, err)
 	}
-	defer closeStmt(t, s)
+	defer close(t, s)
 
 	// Parameter information
 	if s.NumParams() != 3 {
@@ -286,7 +280,7 @@ func TestParams(t *testing.T) {
 		t.Fatalf("s.Params() expected %v; got %v", params, s.Params())
 	}
 
-	// Multiple executions
+	// Multiple inserts
 	if err := s.Exec("a", "b", "c"); err != nil {
 		t.Fatalf(`s.Exec("x", "y", "z") unexpected error: %v`, err)
 	}
@@ -299,12 +293,12 @@ func TestParams(t *testing.T) {
 		t.Fatalf("s.Query(args) expected EOF; got %v", err)
 	}
 
-	// Select everything
-	sql = `SELECT rowid, * FROM x`
+	// Select all rows
+	sql = `SELECT rowid, * FROM x ORDER BY rowid`
 	if s, err = c.Query(sql); err != nil {
-		t.Fatalf("s.Query() unexpected error: %v", err)
+		t.Fatalf("c.Query() unexpected error: %v", err)
 	}
-	defer closeStmt(t, s)
+	defer close(t, s)
 
 	// Verify
 	table := []RowMap{
@@ -335,8 +329,8 @@ func TestParams(t *testing.T) {
 func TestIO(t *testing.T) {
 	checkSkip(t)
 
-	c := openConn(t, ":memory:")
-	defer closeConn(t, c)
+	c := open(t, ":memory:")
+	defer close(t, c)
 
 	// Setup
 	c.Exec(`CREATE TABLE x(a)`)
@@ -347,7 +341,7 @@ func TestIO(t *testing.T) {
 	if err != nil || b == nil {
 		t.Fatalf("c.BlobIO() unexpected error: %v", err)
 	}
-	defer closeBlobIO(t, b)
+	defer close(t, b)
 
 	// Blob information
 	if b.Row() != 1 {
@@ -394,18 +388,17 @@ func TestIO(t *testing.T) {
 			t.Fatalf("b.Seek() expected 0, <nil>; got %d, %v", p, err)
 		}
 	}
-	closeBlobIO(t, b)
+	close(t, b)
 
 	// Verify
 	s, _ := c.Query("SELECT * FROM x ORDER BY rowid")
-	defer closeStmt(t, s)
+	defer close(t, s)
 
 	var have string
 	s.Scan(&have)
 	if want := "1234567\x00"; have != want {
 		t.Fatalf("Row 1 expected %q; got %q", want, have)
 	}
-
 	s.Next()
 	s.Scan(&have)
 	if want := "hello, world"; have != want {
@@ -416,9 +409,9 @@ func TestIO(t *testing.T) {
 func TestBackup(t *testing.T) {
 	checkSkip(t)
 
-	c1, c2 := openConn(t, ":memory:"), openConn(t, ":memory:")
-	defer closeConn(t, c1)
-	defer closeConn(t, c2)
+	c1, c2 := open(t, ":memory:"), open(t, ":memory:")
+	defer close(t, c1)
+	defer close(t, c2)
 
 	// Setup (c1)
 	c1.Exec(`CREATE TABLE x(a)`)
@@ -430,26 +423,75 @@ func TestBackup(t *testing.T) {
 	if err != nil || b == nil {
 		t.Fatalf("b.Backup() unexpected error: %v", err)
 	}
-	defer closeBackup(t, b)
+	defer close(t, b)
 	if err = b.Step(-1); err != io.EOF {
 		t.Fatalf("b.Step(-1) expected EOF; got %v", err)
 	}
-	closeBackup(t, b)
+	close(t, b)
 
 	// Verify (c2)
 	s, _ := c2.Query("SELECT * FROM x ORDER BY rowid")
-	defer closeStmt(t, s)
+	defer close(t, s)
 
 	var have string
 	s.Scan(&have)
 	if want := "1234567\x00"; have != want {
 		t.Fatalf("Row 1 expected %q; got %q", want, have)
 	}
-
 	s.Next()
 	s.Scan(&have)
 	if want := "hello, world"; have != want {
 		t.Fatalf("Row 2 expected %q; got %q", want, have)
+	}
+}
+
+func TestTx(t *testing.T) {
+	checkSkip(t)
+	defer skipIfFailed(t)
+
+	c := open(t, ":memory:")
+	defer close(t, c)
+
+	c.Exec(`CREATE TABLE x(a)`)
+
+	// Begin
+	if err := c.Begin(); err != nil {
+		t.Fatalf("c.Begin() unexpected error: %v", err)
+	}
+	c.Exec(`INSERT INTO x VALUES(?)`, 1)
+	c.Exec(`INSERT INTO x VALUES(?)`, 2)
+
+	// Commit
+	if err := c.Commit(); err != nil {
+		t.Fatalf("c.Commit() unexpected error: %v", err)
+	}
+
+	// Begin
+	if err := c.Begin(); err != nil {
+		t.Fatalf("c.Begin() unexpected error: %v", err)
+	}
+	c.Exec(`INSERT INTO x VALUES(?)`, 3)
+	c.Exec(`INSERT INTO x VALUES(?)`, 4)
+
+	// Rollback
+	if err := c.Rollback(); err != nil {
+		t.Fatalf("c.Rollback() unexpected error: %v", err)
+	}
+
+	// Verify
+	s, _ := c.Query("SELECT * FROM x ORDER BY rowid")
+	defer close(t, s)
+
+	var i int
+	if s.Scan(&i); i != 1 {
+		t.Fatalf("Row 1 expected 1; got %d", i)
+	}
+	s.Next()
+	if s.Scan(&i); i != 2 {
+		t.Fatalf("Row 2 expected 2; got %d", i)
+	}
+	if err := s.Next(); err != io.EOF {
+		t.Fatalf("s.Next() expected EOF; got %v", err)
 	}
 }
 
@@ -461,16 +503,12 @@ func TestDriver(t *testing.T) {
 	if err != nil || c == nil {
 		t.Fatalf("sql.Open() unexpected error: %v", err)
 	}
-	defer func() {
-		if err = c.Close(); err != nil {
-			t.Fatalf("c.Close() unexpected error: %v", err)
-		}
-	}()
+	defer close(t, c)
 
-	// Create table
+	// Setup
 	sql := "CREATE TABLE x(a, b, c)"
 	r, err := c.Exec(sql)
-	if err != nil {
+	if err != nil || r == nil {
 		t.Fatalf("c.Exec(%q) unexpected error: %v", sql, err)
 	}
 	if id, err := r.LastInsertId(); id != 0 || err != nil {
@@ -480,11 +518,18 @@ func TestDriver(t *testing.T) {
 		t.Fatalf("r.RowsAffected() expected 0, <nil>; got %d, %v", n, err)
 	}
 
-	// Insert
+	// Prepare
 	sql = "INSERT INTO x VALUES(?, ?, ?)"
-	r, err = c.Exec(sql, 1, 2.2, "test")
+	s, err := c.Prepare(sql)
 	if err != nil {
-		t.Fatalf("c.Exec(%q) unexpected error: %v", sql, err)
+		t.Fatalf("c.Prepare(%q) unexpected error: %v", sql, err)
+	}
+	defer close(t, s)
+
+	// Multiple inserts
+	r, err = s.Exec(1, 2.2, "test")
+	if err != nil {
+		t.Fatalf("s.Exec(%q) unexpected error: %v", sql, err)
 	}
 	if id, err := r.LastInsertId(); id != 1 || err != nil {
 		t.Fatalf("r.LastInsertId() expected 1, <nil>; got %d, %v", id, err)
@@ -493,20 +538,10 @@ func TestDriver(t *testing.T) {
 		t.Fatalf("r.RowsAffected() expected 1, <nil>; got %d, %v", n, err)
 	}
 
-	// Prepare
-	sql = "INSERT INTO x VALUES(?, ?, ?)"
-	s, err := c.Prepare(sql)
-	if err != nil {
-		t.Fatalf("c.Prepare(%q) unexpected error: %v", sql, err)
-	}
-
-	// Statement reuse
-	r, err = s.Exec(3, 4, 5)
+	r, err = s.Exec(3, []byte{4}, nil)
 	if err != nil {
 		t.Fatalf("s.Exec(%q) unexpected error: %v", sql, err)
 	}
-	defer s.Close()
-
 	if id, err := r.LastInsertId(); id != 2 || err != nil {
 		t.Fatalf("r.LastInsertId() expected 1, <nil>; got %d, %v", id, err)
 	}
@@ -514,5 +549,41 @@ func TestDriver(t *testing.T) {
 		t.Fatalf("r.RowsAffected() expected 1, <nil>; got %d, %v", n, err)
 	}
 
-	// TODO: Not finished...
+	// Select all rows
+	sql = `SELECT rowid, * FROM x ORDER BY rowid`
+	rows, err := c.Query(sql)
+	if err != nil || rows == nil {
+		t.Fatalf("c.Query() unexpected error: %v", err)
+	}
+	defer close(t, rows)
+
+	// Row information
+	want := []string{"rowid", "a", "b", "c"}
+	if have, err := rows.Columns(); !reflect.DeepEqual(want, have) {
+		t.Fatalf("rows.Columns() expected %v, <nil>; got %v, %v", want, have, err)
+	}
+
+	// Verify
+	table := [][]interface{}{
+		[]interface{}{int64(1), int64(1), float64(2.2), []byte("test")},
+		[]interface{}{int64(2), int64(3), []byte{4}, nil},
+	}
+	for i, want := range table {
+		if !rows.Next() {
+			t.Fatalf("rows.Next(%d) expected true", i)
+		}
+		have := make([]interface{}, 4)
+		if err := rows.Scan(&have[0], &have[1], &have[2], &have[3]); err != nil {
+			t.Fatalf("rows.Scan() unexpected error: %v", err)
+		}
+		if !reflect.DeepEqual(want, have) {
+			t.Fatalf("rows.Scan() expected %v; got %v", want, have)
+		}
+	}
+	if rows.Next() {
+		t.Fatalf("rows.Next() expected false")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() unexpected error: %v", err)
+	}
 }
