@@ -158,7 +158,7 @@ func Open(name string) (*Conn, error) {
 
 	c := &Conn{db: db}
 	C.sqlite3_extended_result_codes(db, 1)
-	runtime.SetFinalizer(c, func(c *Conn) { c.Close() })
+	runtime.SetFinalizer(c, (*Conn).Close)
 	return c, nil
 }
 
@@ -543,7 +543,7 @@ func newStmt(c *Conn, sql string) (*Stmt, error) {
 		if s.nCols > 0 {
 			s.colTypes = make([]byte, s.nCols)
 		}
-		runtime.SetFinalizer(s, func(s *Stmt) { s.Close() })
+		runtime.SetFinalizer(s, (*Stmt).Close)
 	}
 	if tail != nil {
 		// tail is a pointer into sql, which is a regular Go string on the heap,

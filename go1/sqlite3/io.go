@@ -52,7 +52,7 @@ func newBlobIO(c *Conn, db, tbl, col string, row int64, rw bool) (*BlobIO, error
 		row:  row,
 		len:  int(C.sqlite3_blob_bytes(blob)),
 	}
-	runtime.SetFinalizer(b, func(b *BlobIO) { b.Close() })
+	runtime.SetFinalizer(b, (*BlobIO).Close)
 	return b, nil
 }
 

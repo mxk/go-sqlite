@@ -34,7 +34,7 @@ func newBackup(src *Conn, srcName string, dst *Conn, dstName string) (*Backup, e
 	}
 
 	b := &Backup{src, dst, bkup}
-	runtime.SetFinalizer(b, func(b *Backup) { b.Close() })
+	runtime.SetFinalizer(b, (*Backup).Close)
 	return b, nil
 }
 
