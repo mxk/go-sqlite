@@ -2935,7 +2935,7 @@ static char *cmdline_option_value(int argc, char **argv, int i){
   return argv[i];
 }
 
-int main(int argc, char **argv){
+int shell_main(int argc, char **argv){
   char *zErrMsg = 0;
   struct callback_data data;
   const char *zInitFile = 0;
