@@ -17,22 +17,15 @@ The package uses cgo to call SQLite library functions. Your system must have gcc
 installed to build this package. Windows users should install mingw-w64
 (http://mingw-w64.sourceforge.net/), TDM64-GCC (http://tdm-gcc.tdragon.net/), or
 another MinGW distribution, and make sure that gcc.exe is available from your
-PATH.
+PATH. Once gcc is installed, you should be able to 'go get' or 'go install' this
+package without any additional work.
 
-On Windows, the SQLite amalgamation source is compiled into the package, which
-eliminates external dependencies. To use a different version of the library,
-download and extract the amalgamation source from
-http://www.sqlite.org/download.html, then copy sqlite3.h and sqlite3.c to the
-package directory, renaming sqlite.c to sqlite3_windows.c.
+Starting with Go 1.1, the SQLite amalgamation source is compiled into the
+package on all hosts. The shared library is no longer required and the only
+extra dependency on Linux is libdl (used by SQLite to load extensions).
 
-On *nix, SQLite has to be used as a shared library. Eventually, it may be
-possible to compile the amalgamation source into the package, as done on Windows
-(see Go issue 4069). For now, pkg-config is used to locate and link with the
-shared library. You can modify the #cgo lines in sqlite3_unix.go to change this
-behavior.
-
-The minimum version of the shared library that will work with this package is
-3.7.14 (released 2012-09-03) due to the use of sqlite3_close_v2() interface.
+With Go 1.0 on *nix, the package is linked against the shared library. The
+minimum supported version of libsqlite3.so is 3.7.14 (released 2012-09-03).
 
 Concurrency
 
@@ -40,8 +33,9 @@ A single connection and all related objects (prepared statements, backup
 operations, etc.) may NOT be used concurrently from multiple goroutines without
 external locking. All methods in this package, with the exception of
 Conn.Interrupt, assume single-threaded operation. Depending on how SQLite was
-compiled, it should be safe to use separate database connections concurrently,
-even if they are accessing the same database file. For example:
+compiled (if using the shared library), it should be safe to use separate
+database connections concurrently, even if they are accessing the same database
+file. For example:
 
 	// ERROR (without any extra synchronization)
 	c, _ := sqlite3.Open("./sqlite.db")
@@ -54,8 +48,8 @@ even if they are accessing the same database file. For example:
 	go use(c1)
 	go use(c2)
 
-If the SQLite library was compiled with -DSQLITE_THREADSAFE=0, then all mutex
-code was omitted, and this package is unsafe for concurrent access even to
+If the SQLite shared library was compiled with -DSQLITE_THREADSAFE=0, then all
+mutex code was omitted, and this package is unsafe for concurrent access even to
 separate database connections. Use SingleThread() to determine if this is the
 case. By default, SQLite is compiled with SQLITE_THREADSAFE=1, which enables
 serialized threading mode. This package switches it to 2 (multi-thread) during

@@ -2,12 +2,15 @@
 // Written by Maxim Khitrov (February 2013)
 //
 
+// +build windows go1.1
+
 package sqlite3
 
 /*
-#include "sqlite3.h"
+#cgo CFLAGS: -DNDEBUG
+#cgo linux LDFLAGS: -ldl
 
-#cgo CFLAGS: -DNDEBUG -fno-stack-check -fno-stack-protector -mno-stack-arg-probe
+#include "sqlite3.h"
 
 int shell_main(int, void*);
 */
@@ -15,7 +18,7 @@ import "C"
 
 import "unsafe"
 
-// shell runs shell_main defined in shell_windows.c (renamed main).
+// shell runs shell_main defined in shell.c (renamed main).
 func shell(args []string) int {
 	// Copy all arguments into a single []byte, terminating each one with '\0'
 	buf := make([]byte, 0, 256)

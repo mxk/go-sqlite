@@ -92,7 +92,7 @@ func libErr(rc C.int, db *C.sqlite3) error {
 		return &Error{int(rc), C.GoString(C.sqlite3_errmsg(db))}
 	}
 	// sqlite3_errstr didn't appear until version 3.7.15... That was a bit of a
-	// surprise. errstr is a replacement defined in sqlite3_{unix,windows}.go.
+	// surprise. errstr is a replacement defined in sqlite3_{shared,static}.go.
 	return &Error{int(rc), errstr(rc)}
 }
 
@@ -123,14 +123,11 @@ var (
 )
 
 // Shell runs the command-line shell that is normally accessed with the sqlite3
-// command. The usual command-line arguments are passed in args. On Windows, the
-// shell is compiled into the package. On *nix, exec.LookPath is used to locate
-// the sqlite3 binary, which is executed as a separate process. The shell's exit
-// status is returned (0 = normal exit).
+// command. The shell's exit status is returned (0 = normal).
 // [http://www.sqlite.org/sqlite.html]
 func Shell(args ...string) int {
 	args = append([]string{os.Args[0]}, args...)
-	return shell(args) // implemented in sqlite3_{windows,unix}.go
+	return shell(args) // implemented in sqlite3_{shared,static}.go
 }
 
 // Complete returns true if sql appears to contain a complete statement that is

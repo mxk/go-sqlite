@@ -2,7 +2,7 @@
 // Written by Maxim Khitrov (February 2013)
 //
 
-// +build !windows
+// +build !windows,!go1.1
 
 package sqlite3
 
@@ -11,8 +11,7 @@ package sqlite3
 
 // To avoid using pkg-config, comment out the line above and uncomment the one
 // below. Use -L to specify the directory containing libsqlite3.so.
-//
-//#cgo LDFLAGS: -lsqlite3 -L/path/to/libsqlite3.so
+//#cgo LDFLAGS: -lsqlite3
 */
 import "C"
 
@@ -43,8 +42,8 @@ func shell(args []string) int {
 	return 0
 }
 
-// errstr is a temporary replacement for sqlite3_errstr, which was added in
-// SQLite 3.7.15 and may not be available on most *nix systems as of 2013-02-11.
+// errstr is a replacement for sqlite3_errstr, which was added in SQLite 3.7.15
+// and may not be available on most *nix systems as of 2013-02-11.
 func errstr(rc C.int) string {
 	msg := "unknown error"
 	switch rc {
@@ -60,7 +59,7 @@ func errstr(rc C.int) string {
 }
 
 // errMsg contains copies of the error messages returned by sqlite3ErrStr (from
-// SQLite 3.7.15.2).
+// SQLite 3.7.16.1).
 var errMsg = [...]string{
 	/* SQLITE_OK          */ "not an error",
 	/* SQLITE_ERROR       */ "SQL logic error or missing database",
