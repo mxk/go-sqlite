@@ -8,6 +8,7 @@ package sqlite3
 
 /*
 #cgo CFLAGS: -DNDEBUG
+#cgo windows CFLAGS: -fno-stack-check -fno-stack-protector -mno-stack-arg-probe
 #cgo linux LDFLAGS: -ldl
 
 #include "sqlite3.h"
