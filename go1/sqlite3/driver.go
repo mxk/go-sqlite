@@ -11,6 +11,7 @@ import (
 	"database/sql/driver"
 	"io"
 	"reflect"
+	"time"
 	"unsafe"
 )
 
@@ -27,6 +28,7 @@ func (Driver) Open(name string) (driver.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.BusyTimeout(5 * time.Second)
 	return &conn{c}, nil
 }
 
