@@ -59,7 +59,7 @@ func errstr(rc C.int) string {
 }
 
 // errMsg contains copies of the error messages returned by sqlite3ErrStr (from
-// SQLite 3.7.16.1).
+// SQLite 3.7.17).
 var errMsg = [...]string{
 	/* SQLITE_OK          */ "not an error",
 	/* SQLITE_ERROR       */ "SQL logic error or missing database",
