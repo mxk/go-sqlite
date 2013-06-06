@@ -48,7 +48,7 @@ static void init_temp_dir(const char *path) {
 
 // cgo doesn't handle pointer constants for sqlite3_bind_{text,blob}.
 static int bind_text_trans(sqlite3_stmt *s, int i, const char *p, int n) {
-	return sqlite3_bind_text(s, i, p, n, SQLITE_TRANSIENT);
+	return sqlite3_bind_text(s, i, (n == 0 ? "" : p), n, SQLITE_TRANSIENT);
 }
 static int bind_blob_trans(sqlite3_stmt *s, int i, const void *p, int n) {
 	if (n > 0) {
@@ -58,7 +58,7 @@ static int bind_blob_trans(sqlite3_stmt *s, int i, const void *p, int n) {
 	return sqlite3_bind_zeroblob(s, i, 0);
 }
 static int bind_text_static(sqlite3_stmt *s, int i, const char *p, int n) {
-	return sqlite3_bind_text(s, i, p, n, SQLITE_STATIC);
+	return sqlite3_bind_text(s, i, (n == 0 ? "" : p), n, SQLITE_STATIC);
 }
 static int bind_blob_static(sqlite3_stmt *s, int i, const void *p, int n) {
 	if (n > 0) {
