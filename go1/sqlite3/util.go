@@ -6,6 +6,8 @@ package sqlite3
 
 /*
 #include "sqlite3.h"
+
+int shell_main(int, void*);
 */
 import "C"
 
@@ -91,9 +93,7 @@ func libErr(rc C.int, db *C.sqlite3) error {
 	if db != nil && rc == C.sqlite3_errcode(db) {
 		return &Error{int(rc), C.GoString(C.sqlite3_errmsg(db))}
 	}
-	// sqlite3_errstr didn't appear until version 3.7.15... That was a bit of a
-	// surprise. errstr is a replacement defined in sqlite3_{shared,static}.go.
-	return &Error{int(rc), errstr(rc)}
+	return &Error{int(rc), C.GoString(C.sqlite3_errstr(rc))}
 }
 
 // pkgErr reports an error originating in this package.
@@ -122,12 +122,27 @@ var (
 	ErrBadBackup = &Error{MISUSE, "closed or invalid backup operation"}
 )
 
-// Shell runs the command-line shell that is normally accessed with the sqlite3
-// command. The shell's exit status is returned (0 = normal).
-// [http://www.sqlite.org/sqlite.html]
+// Shell is deprecated and will be removed in the near future. Don't use it!
 func Shell(args ...string) int {
+	if initerr != nil {
+		return 127
+	}
 	args = append([]string{os.Args[0]}, args...)
-	return shell(args) // implemented in sqlite3_{shared,static}.go
+
+	// Copy all arguments into a single []byte, terminating each one with '\0'
+	buf := make([]byte, 0, 256)
+	for _, arg := range args {
+		buf = append(append(buf, arg...), 0)
+	}
+
+	// Fill argv with pointers to the start of each null-terminated string
+	argv := make([]uintptr, len(args))
+	base := uintptr(cBytes(buf))
+	for i, arg := range args {
+		argv[i] = base
+		base += uintptr(len(arg)) + 1
+	}
+	return int(C.shell_main(C.int(len(args)), unsafe.Pointer(&argv[0])))
 }
 
 // Complete returns true if sql appears to contain a complete statement that is

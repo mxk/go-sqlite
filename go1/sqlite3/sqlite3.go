@@ -5,6 +5,10 @@
 package sqlite3
 
 /*
+// Temporary fix for "fchmod undeclared" error.
+// [http://www.sqlite.org/cgi/src/info/61a1045239]
+#cgo !darwin CFLAGS: -D_XOPEN_SOURCE=600
+
 #include "sqlite3.h"
 
 // Macro for setting and clearing SQLite callbacks.

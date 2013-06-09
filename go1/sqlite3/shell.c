@@ -1,5 +1,3 @@
-// +build windows go1.1
-
 /*
 ** 2001 September 15
 **
