@@ -275,20 +275,21 @@ func Print(s *Stmt) error {
 	return err
 }
 
-// namedArgs checks if args contains named parameter values, and if so, returns
-// the NamedArgs map.
-func namedArgs(args []interface{}) (named NamedArgs) {
-	if len(args) == 1 {
-		named, _ = args[0].(NamedArgs)
-	}
-	return
-}
-
-// cStr returns a pointer to the first byte in s. s must end with '\x00' to be
-// used as a regular C string.
+// cStr returns a pointer to the first byte in s, which must be a
+// null-terminated string.
 func cStr(s string) *C.char {
 	h := (*reflect.StringHeader)(unsafe.Pointer(&s))
 	return (*C.char)(unsafe.Pointer(h.Data))
+}
+
+// cStrOffset returns the offset of p in s, which must be a null-terminated
+// string. It panics if p is not a pointer into s.
+func cStrOffset(s string, p *C.char) int {
+	start := (*reflect.StringHeader)(unsafe.Pointer(&s)).Data
+	if n := uintptr(unsafe.Pointer(p)) - start; n < uintptr(len(s)) {
+		return int(n)
+	}
+	panic("sqlite3: p is not a pointer into s")
 }
 
 // cBytes returns a pointer to the first byte in b.

@@ -504,11 +504,12 @@ type Stmt struct {
 
 // newStmt creates a new prepared statement.
 func newStmt(c *Conn, sql string) (*Stmt, error) {
-	sql += "\x00"
+	zSql := sql + "\x00"
 
 	var stmt *C.sqlite3_stmt
 	var tail *C.char
-	if rc := C.sqlite3_prepare_v2(c.db, cStr(sql), -1, &stmt, &tail); rc != OK {
+	rc := C.sqlite3_prepare_v2(c.db, cStr(zSql), -1, &stmt, &tail)
+	if rc != OK {
 		return nil, libErr(rc, c.db)
 	}
 
@@ -524,9 +525,7 @@ func newStmt(c *Conn, sql string) (*Stmt, error) {
 		runtime.SetFinalizer(s, (*Stmt).Close)
 	}
 	if tail != nil {
-		// tail is a pointer into sql, which is a regular Go string on the heap,
-		// so an extra C.GoString allocation can be avoided.
-		s.Tail = goStr(tail)
+		s.Tail = sql[cStrOffset(zSql, tail):]
 	}
 	return s, nil
 }
@@ -1021,6 +1020,15 @@ func (s *Stmt) scanDynamic(i C.int, v *interface{}, driverValue bool) error {
 		return pkgErr(ERROR, "unknown column type (%d)", typ)
 	}
 	return nil
+}
+
+// namedArgs checks if args contains named parameter values, and if so, returns
+// the NamedArgs map.
+func namedArgs(args []interface{}) (named NamedArgs) {
+	if len(args) == 1 {
+		named, _ = args[0].(NamedArgs)
+	}
+	return
 }
 
 // text returns the value of column i as a string. If copy is false, the string
