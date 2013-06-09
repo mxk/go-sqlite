@@ -30,60 +30,43 @@ package sqlite3
 
 #include "sqlite3.h"
 
-// Macro for setting and clearing SQLite callbacks.
-#define SET_CALLBACK(name, db, conn, enable) \
-	if (enable) {                            \
-		sqlite3_##name(db, go_##name, conn); \
-	} else {                                 \
-		sqlite3_##name(db, 0, 0);            \
-	}
-
-// util.go exports.
-int go_busy_handler(void*, int);
-int go_commit_hook(void*);
-void go_rollback_hook(void*);
-void go_update_hook(void*, int, const char*, const char*, sqlite3_int64);
-
-// Functions for setting and clearing SQLite callbacks.
-static void set_busy_handler(sqlite3 *db, void *conn, int enable) {
-	SET_CALLBACK(busy_handler, db, conn, enable)
-}
-static void set_commit_hook(sqlite3 *db, void *conn, int enable) {
-	SET_CALLBACK(commit_hook, db, conn, enable)
-}
-static void set_rollback_hook(sqlite3 *db, void *conn, int enable) {
-	SET_CALLBACK(rollback_hook, db, conn, enable)
-}
-static void set_update_hook(sqlite3 *db, void *conn, int enable) {
-	SET_CALLBACK(update_hook, db, conn, enable)
-}
-
-// cgo doesn't handle '...' arguments for sqlite3_{config,mprintf}.
+// cgo doesn't handle variadic functions.
 static void set_temp_dir(const char *path) {
 	sqlite3_temp_directory = sqlite3_mprintf("%s", path);
 }
 
-// cgo doesn't handle pointer constants for sqlite3_bind_{text,blob}.
-static int bind_text_trans(sqlite3_stmt *s, int i, const char *p, int n) {
-	return sqlite3_bind_text(s, i, (n == 0 ? "" : p), n, SQLITE_TRANSIENT);
-}
-static int bind_blob_trans(sqlite3_stmt *s, int i, const void *p, int n) {
+// cgo doesn't handle SQLITE_{STATIC,TRANSIENT} pointer constants.
+static int bind_text(sqlite3_stmt *s, int i, const char *p, int n, int copy) {
 	if (n > 0) {
-		return sqlite3_bind_blob(s, i, p, n, SQLITE_TRANSIENT);
+		return sqlite3_bind_text(s, i, p, n,
+			(copy ? SQLITE_TRANSIENT : SQLITE_STATIC));
 	}
-	// For consistency between []byte(nil) and []byte("")
+	return sqlite3_bind_text(s, i, "", 0, SQLITE_STATIC);
+}
+static int bind_blob(sqlite3_stmt *s, int i, const void *p, int n, int copy) {
+	if (n > 0) {
+		return sqlite3_bind_blob(s, i, p, n,
+			(copy ? SQLITE_TRANSIENT : SQLITE_STATIC));
+	}
 	return sqlite3_bind_zeroblob(s, i, 0);
 }
-static int bind_text_static(sqlite3_stmt *s, int i, const char *p, int n) {
-	return sqlite3_bind_text(s, i, (n == 0 ? "" : p), n, SQLITE_STATIC);
+
+// Macro for creating callback setter functions.
+#define SET(x) \
+static void set_##x(sqlite3 *db, void *conn, int enable) { \
+	(enable ? sqlite3_##x(db, go_##x, conn) : sqlite3_##x(db, 0, 0)); \
 }
-static int bind_blob_static(sqlite3_stmt *s, int i, const void *p, int n) {
-	if (n > 0) {
-		return sqlite3_bind_blob(s, i, p, n, SQLITE_STATIC);
-	}
-	// For consistency between RawBytes(nil) and RawBytes("")
-	return sqlite3_bind_zeroblob(s, i, 0);
-}
+
+// util.go exports.
+int go_busy_handler(void*,int);
+int go_commit_hook(void*);
+void go_rollback_hook(void*);
+void go_update_hook(void*,int,const char*,const char*,sqlite3_int64);
+
+SET(busy_handler)
+SET(commit_hook)
+SET(rollback_hook)
+SET(update_hook)
 */
 import "C"
 
@@ -876,15 +859,15 @@ func (s *Stmt) bind(i C.int, v interface{}, name string) error {
 	case bool:
 		rc = C.sqlite3_bind_int(s.stmt, i, cBool(v))
 	case string:
-		rc = C.bind_text_trans(s.stmt, i, cStr(v), C.int(len(v)))
+		rc = C.bind_text(s.stmt, i, cStr(v), C.int(len(v)), 1)
 	case []byte:
-		rc = C.bind_blob_trans(s.stmt, i, cBytes(v), C.int(len(v)))
+		rc = C.bind_blob(s.stmt, i, cBytes(v), C.int(len(v)), 1)
 	case time.Time:
 		rc = C.sqlite3_bind_int64(s.stmt, i, C.sqlite3_int64(v.Unix()))
 	case RawString:
-		rc = C.bind_text_static(s.stmt, i, cStr(string(v)), C.int(len(v)))
+		rc = C.bind_text(s.stmt, i, cStr(string(v)), C.int(len(v)), 0)
 	case RawBytes:
-		rc = C.bind_blob_static(s.stmt, i, cBytes(v), C.int(len(v)))
+		rc = C.bind_blob(s.stmt, i, cBytes(v), C.int(len(v)), 0)
 	case ZeroBlob:
 		rc = C.sqlite3_bind_zeroblob(s.stmt, i, C.int(v))
 	default:
