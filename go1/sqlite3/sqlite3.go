@@ -853,13 +853,13 @@ func (s *Stmt) bind(i C.int, v interface{}, name string) error {
 	var rc C.int
 	switch v := v.(type) {
 	case int:
-		rc = C.sqlite3_bind_int(s.stmt, i, C.int(v))
+		rc = C.sqlite3_bind_int64(s.stmt, i, C.sqlite3_int64(v))
 	case int64:
 		rc = C.sqlite3_bind_int64(s.stmt, i, C.sqlite3_int64(v))
 	case float64:
 		rc = C.sqlite3_bind_double(s.stmt, i, C.double(v))
 	case bool:
-		rc = C.sqlite3_bind_int(s.stmt, i, cBool(v))
+		rc = C.sqlite3_bind_int64(s.stmt, i, C.sqlite3_int64(cBool(v)))
 	case string:
 		rc = C.bind_text(s.stmt, i, cStr(v), C.int(len(v)), 1)
 	case []byte:
@@ -928,7 +928,7 @@ func (s *Stmt) scan(i C.int, v interface{}) error {
 	case *interface{}:
 		return s.scanDynamic(i, v, false)
 	case *int:
-		*v = int(C.sqlite3_column_int(s.stmt, i))
+		*v = int(C.sqlite3_column_int64(s.stmt, i))
 	case *int64:
 		*v = int64(C.sqlite3_column_int64(s.stmt, i))
 	case *float64:
