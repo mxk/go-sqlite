@@ -21,7 +21,7 @@ import (
 
 // NamedArgs is a name/value map of arguments passed to a prepared statement
 // that uses ?NNN, :AAA, @AAA, and/or $AAA parameter formats. Name matching is
-// case-sensitive and the prefix character (one of "?:@$") must be included in
+// case-sensitive and the prefix character (one of [?:@$]) must be included in
 // the name. Names that are missing from the map are treated as NULL. Names that
 // are not used in the prepared statement are ignored.
 //
@@ -159,6 +159,9 @@ func Complete(sql string) bool {
 // ReleaseMemory attempts to free n bytes of heap memory by deallocating
 // non-essential memory held by the SQLite library. It returns the number of
 // bytes actually freed.
+//
+// This function is currently a no-op because SQLite is not compiled with the
+// SQLITE_ENABLE_MEMORY_MANAGEMENT option.
 // [http://www.sqlite.org/c3ref/release_memory.html]
 func ReleaseMemory(n int) int {
 	if initErr != nil {
@@ -366,7 +369,6 @@ func go_rollback_hook(conn unsafe.Pointer) {
 //export go_update_hook
 func go_update_hook(conn unsafe.Pointer, op C.int, db, tbl *C.char, row C.sqlite3_int64) {
 	if c := (*Conn)(conn); c != nil && c.db != nil && c.update != nil {
-		c.update(int(op), RawString(goStr(db)), RawString(goStr(tbl)),
-			int64(row))
+		c.update(int(op), RawString(goStr(db)), RawString(goStr(tbl)), int64(row))
 	}
 }

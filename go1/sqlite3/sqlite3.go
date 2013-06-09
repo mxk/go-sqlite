@@ -145,8 +145,8 @@ func Open(name string) (*Conn, error) {
 // active, the connection becomes an unusable "zombie" and is closed after all
 // remaining statements and operations are destroyed. A BUSY error code is
 // returned if the connection is left in this "zombie" status, which may
-// indicate a programming mistake where some previously allocated resource was
-// not properly released.
+// indicate a programming error where some previously allocated resource is not
+// properly released.
 // [http://www.sqlite.org/c3ref/close.html]
 func (c *Conn) Close() error {
 	if db := c.db; db != nil {
@@ -182,15 +182,16 @@ func (c *Conn) Prepare(sql string) (*Stmt, error) {
 // 	// UPDATE x SET a=1
 // 	// UPDATE x SET b=2
 //
-// When NamedArgs is used, the entire map is passed to every statement in sql,
-// and unreferenced names are ignored. The following example is identical to the
-// one above:
+// With NamedArgs, the entire map is passed to every statement in sql and
+// unreferenced names are ignored. The following example is identical to the
+// previous one:
 //
-// 	args := NamedArgs{"@A": 1, "@B": 2}
-// 	c.Exec("UPDATE x SET a=@A; UPDATE x SET b=@B", args)
+// 	args := NamedArgs{"@a": 1, "@b": 2}
+// 	c.Exec("UPDATE x SET a=@a; UPDATE x SET b=@b", args)
 //
-// Without any arguments, the statements are executed by a single call to
-// sqlite3_exec, which should be faster, especially for long SQL scripts.
+// Without any extra arguments, the statements in sql are executed by a single
+// call to sqlite3_exec.
+// [http://www.sqlite.org/c3ref/exec.html]
 func (c *Conn) Exec(sql string, args ...interface{}) error {
 	if c.db == nil {
 		return ErrBadConn
@@ -215,25 +216,27 @@ func (c *Conn) Exec(sql string, args ...interface{}) error {
 		if s.stmt == nil {
 			return nil // Comment or whitespace
 		}
-		var myArgs []interface{}
-		if s.nVars > 0 {
-			if myArgs = args; unnamed {
-				if s.nVars < len(myArgs) {
-					myArgs = myArgs[:s.nVars]
-				}
-				args = args[len(myArgs):]
-			}
+		if s.nVars == 0 {
+			return s.exec(nil)
 		}
-		return s.exec(myArgs)
+		sArgs := args
+		if unnamed {
+			if s.nVars < len(sArgs) {
+				sArgs = sArgs[:s.nVars]
+			}
+			args = args[len(sArgs):]
+		}
+		return s.exec(sArgs)
 	}
-	var err error
-	for sql != "" && err == nil {
-		err = execNext()
+	for sql != "" {
+		if err := execNext(); err != nil {
+			return err
+		}
 	}
-	if unnamed && err == nil && len(args) != 0 {
-		return pkgErr(MISUSE, "%d argument(s) left unconsumed", len(args))
+	if unnamed && len(args) != 0 {
+		return pkgErr(MISUSE, "%d unconsumed argument(s)", len(args))
 	}
-	return err
+	return nil
 }
 
 // Query is a convenience method for executing the first query in sql. It
