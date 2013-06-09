@@ -124,7 +124,7 @@ var (
 
 // Shell is deprecated and will be removed in the near future. Don't use it!
 func Shell(args ...string) int {
-	if initerr != nil {
+	if initErr != nil {
 		return 127
 	}
 	args = append([]string{os.Args[0]}, args...)
@@ -149,7 +149,7 @@ func Shell(args ...string) int {
 // ready to be parsed. This does not validate the statement syntax.
 // [http://www.sqlite.org/c3ref/complete.html]
 func Complete(sql string) bool {
-	if initerr != nil {
+	if initErr != nil {
 		return false
 	}
 	sql += "\x00"
@@ -161,7 +161,7 @@ func Complete(sql string) bool {
 // bytes actually freed.
 // [http://www.sqlite.org/c3ref/release_memory.html]
 func ReleaseMemory(n int) int {
-	if initerr != nil {
+	if initErr != nil {
 		return 0
 	}
 	return int(C.sqlite3_release_memory(C.int(n)))
@@ -171,9 +171,14 @@ func ReleaseMemory(n int) int {
 // -DSQLITE_THREADSAFE=0. With this threading mode, all mutex code is omitted
 // and this package becomes unsafe for concurrent access, even to separate
 // database connections.
+//
+// This function was needed in Go 1.0 when the package was dynamically linked
+// with the system's SQLite library on *nix. As of Go 1.1, the SQLite
+// amalgamation is compiled into the package with -DSQLITE_THREADSAFE=2, so this
+// function always returns false and is kept only for backward compatibility.
 // [http://www.sqlite.org/threadsafe.html]
 func SingleThread() bool {
-	return threadsafe == 0
+	return initErr == nil && C.sqlite3_threadsafe() == 0
 }
 
 // SoftHeapLimit sets and/or queries the soft limit on the amount of heap memory
@@ -182,7 +187,7 @@ func SingleThread() bool {
 // negative values indicating an error.
 // [http://www.sqlite.org/c3ref/soft_heap_limit64.html]
 func SoftHeapLimit(n int64) int64 {
-	if initerr != nil {
+	if initErr != nil {
 		return -1
 	}
 	return int64(C.sqlite3_soft_heap_limit64(C.sqlite3_int64(n)))
@@ -193,7 +198,7 @@ func SoftHeapLimit(n int64) int64 {
 // c0e09560d26f0a6456be9dd3447f5311eb4f238f").
 // [http://www.sqlite.org/c3ref/c_source_id.html]
 func SourceId() string {
-	if initerr != nil {
+	if initErr != nil {
 		return ""
 	}
 	return C.GoString(C.sqlite3_sourceid())
@@ -204,8 +209,8 @@ func SourceId() string {
 // value is reset back down to the current value after retrieval.
 // [http://www.sqlite.org/c3ref/status.html]
 func Status(op int, reset bool) (cur, peak int, err error) {
-	if initerr != nil {
-		return 0, 0, initerr
+	if initErr != nil {
+		return 0, 0, initErr
 	}
 	var cCur, cPeak C.int
 	rc := C.sqlite3_status(C.int(op), &cCur, &cPeak, cBool(reset))
@@ -218,7 +223,7 @@ func Status(op int, reset bool) (cur, peak int, err error) {
 // Version returns the SQLite version as a string in the format "X.Y.Z[.N]".
 // [http://www.sqlite.org/c3ref/libversion.html]
 func Version() string {
-	if initerr != nil {
+	if initErr != nil {
 		return ""
 	}
 	return C.GoString(C.sqlite3_libversion())
@@ -228,7 +233,7 @@ func Version() string {
 // Y*1000 + Z, where X is the major version, Y is the minor version, and Z is
 // the release number.
 func VersionNum() int {
-	if initerr != nil {
+	if initErr != nil {
 		return 0
 	}
 	return int(C.sqlite3_libversion_number())

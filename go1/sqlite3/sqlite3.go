@@ -5,6 +5,25 @@
 package sqlite3
 
 /*
+// SQLite compilation options.
+// [http://www.sqlite.org/compile.html]
+// [http://www.sqlite.org/footprint.html]
+#cgo CFLAGS: -Os
+#cgo CFLAGS: -DNDEBUG=1
+#cgo CFLAGS: -DSQLITE_THREADSAFE=2
+#cgo CFLAGS: -DSQLITE_TEMP_STORE=2
+#cgo CFLAGS: -DSQLITE_USE_URI=1
+#cgo CFLAGS: -DSQLITE_ENABLE_FTS3_PARENTHESIS=1
+#cgo CFLAGS: -DSQLITE_ENABLE_FTS4=1
+#cgo CFLAGS: -DSQLITE_ENABLE_RTREE=1
+#cgo CFLAGS: -DSQLITE_ENABLE_STAT3=1
+#cgo CFLAGS: -DSQLITE_SOUNDEX=1
+#cgo CFLAGS: -DSQLITE_OMIT_AUTHORIZATION=1
+#cgo CFLAGS: -DSQLITE_OMIT_AUTOINIT=1
+#cgo CFLAGS: -DSQLITE_OMIT_LOAD_EXTENSION=1
+#cgo CFLAGS: -DSQLITE_OMIT_TRACE=1
+#cgo CFLAGS: -DSQLITE_OMIT_UTF16=1
+
 // Temporary fix for "fchmod undeclared" error.
 // [http://www.sqlite.org/cgi/src/info/61a1045239]
 #cgo !darwin CFLAGS: -D_XOPEN_SOURCE=600
@@ -40,13 +59,7 @@ static void set_update_hook(sqlite3 *db, void *conn, int enable) {
 }
 
 // cgo doesn't handle '...' arguments for sqlite3_{config,mprintf}.
-static int init_config(int op) {
-	return sqlite3_config(op);
-}
-static int init_config_uri(int onoff) {
-	return sqlite3_config(SQLITE_CONFIG_URI, onoff);
-}
-static void init_temp_dir(const char *path) {
+static void set_temp_dir(const char *path) {
 	sqlite3_temp_directory = sqlite3_mprintf("%s", path);
 }
 
@@ -83,43 +96,21 @@ import (
 	"unsafe"
 )
 
-// initerr is used to indicate a fatal initialization error, which disables this
-// package, but allows the rest of the program to continue running.
-var initerr error
-
-// threadsafe is the current threading mode setting. It is initialized to the
-// value of SQLITE_THREADSAFE and changed to 2 (multi-thread) in init.
-var threadsafe = int(C.sqlite3_threadsafe())
+// initErr indicates a SQLite initialization error, which disables this package.
+var initErr error
 
 func init() {
-	if threadsafe != 0 && threadsafe != 2 {
-		// Use multi-thread mode, unless the library was compiled with
-		// -DSQLITE_THREADSAFE=0. There is no point in using serialized mode,
-		// since code in this package is not thread-safe anyway (e.g. when
-		// accessing error information).
-		if rc := C.init_config(C.SQLITE_CONFIG_MULTITHREAD); rc != OK {
-			initerr = libErr(rc, nil)
-			return
-		}
-		threadsafe = 2
+	// Initialize SQLite (required with SQLITE_OMIT_AUTOINIT).
+	// [http://www.sqlite.org/c3ref/initialize.html]
+	if rc := C.sqlite3_initialize(); rc != OK {
+		initErr = libErr(rc, nil)
+		return
 	}
-
-	// Enable URI handling by default (requires SQLite version 3.7.7+).
-	C.init_config_uri(1)
 
 	// Use the same temporary directory as Go.
 	// [http://www.sqlite.org/c3ref/temp_directory.html]
 	tmp := os.TempDir() + "\x00"
-	C.init_temp_dir(cStr(tmp))
-
-	// "For maximum portability, it is recommended that applications always
-	// invoke sqlite3_initialize() directly prior to using any other SQLite
-	// interface. Future releases of SQLite may require this."
-	// [http://www.sqlite.org/c3ref/initialize.html]
-	if rc := C.sqlite3_initialize(); rc != OK {
-		initerr = libErr(rc, nil)
-		return
-	}
+	C.set_temp_dir(cStr(tmp))
 
 	// Register database/sql driver.
 	register("sqlite3")
@@ -146,8 +137,8 @@ type Conn struct {
 // by os.TempDir().
 // [http://www.sqlite.org/c3ref/open.html]
 func Open(name string) (*Conn, error) {
-	if initerr != nil {
-		return nil, initerr
+	if initErr != nil {
+		return nil, initErr
 	}
 	name += "\x00"
 
