@@ -5,164 +5,145 @@
 /*
 Package sqlite3 provides an interface to SQLite version 3 databases.
 
-Database connections are created either directly via this package or with the
-"sqlite3" database/sql driver. The driver is recommended when your application
-has to support multiple database engines. The direct interface exposes
-SQLite-specific features, such as incremental I/O and online backups, and
-provides better performance.
+Database connections are created either by using this package directly or with
+the "sqlite3" database/sql driver. The direct interface, which is described
+below, exposes SQLite-specific features, such as incremental I/O and online
+backups. The driver is recommended when your application has to support multiple
+database engines.
 
 Installation
 
-The package uses cgo to call SQLite library functions. Your system must have gcc
-installed to build this package. Windows users should install mingw-w64
-(http://mingw-w64.sourceforge.net/), TDM64-GCC (http://tdm-gcc.tdragon.net/), or
-another MinGW distribution, and make sure that gcc.exe is available from your
-PATH. Once gcc is installed, you should be able to 'go get' or 'go install' this
-package without any additional work.
+Minimum requirements are Go 1.1+ with CGO enabled and GCC/MinGW C compiler. The
+SQLite amalgamation version 3.7.17 (2013-05-20) is compiled as part of the
+package (see http://www.sqlite.org/amalgamation.html). Compilation options are
+defined at the top of sqlite3.go (#cgo CFLAGS). Dynamic linking with a shared
+SQLite library is not supported, but send in a feature request if there is a
+good argument for it.
 
-Starting with Go 1.1, the SQLite amalgamation source is compiled into the
-package on all hosts. The shared library is no longer required and the only
-extra dependency on Linux is libdl (used by SQLite to load extensions).
+Windows users should install mingw-w64 (http://mingw-w64.sourceforge.net/),
+TDM64-GCC (http://tdm-gcc.tdragon.net/), or another MinGW distribution, and make
+sure that gcc.exe is available from the %PATH%. MSYS is not required.
 
-With Go 1.0 on *nix, the package is linked against the shared library. The
-minimum supported version of libsqlite3.so is 3.7.14 (released 2012-09-03).
+Run 'go get code.google.com/p/go-sqlite/go1/sqlite3' to download, build, and
+install the package.
 
 Concurrency
 
-A single connection and all related objects (prepared statements, backup
-operations, etc.) may NOT be used concurrently from multiple goroutines without
-external locking. All methods in this package, with the exception of
-Conn.Interrupt, assume single-threaded operation. Depending on how SQLite was
-compiled (if using the shared library), it should be safe to use separate
-database connections concurrently, even if they are accessing the same database
-file. For example:
+A single connection instance and all of its derived objects (prepared
+statements, backup operations, etc.) may NOT be used concurrently from multiple
+goroutines without external synchronization. The only exception is
+Conn.Interrupt(), which may be called from another goroutine to abort a
+long-running operation. It is safe to use separate connection instances
+concurrently, even if they are accessing the same database file. For example:
 
 	// ERROR (without any extra synchronization)
-	c, _ := sqlite3.Open("./sqlite.db")
+	c, _ := sqlite3.Open("sqlite.db")
 	go use(c)
 	go use(c)
 
 	// OK
-	c1, _ := sqlite3.Open("./sqlite.db")
-	c2, _ := sqlite3.Open("./sqlite.db")
+	c1, _ := sqlite3.Open("sqlite.db")
+	c2, _ := sqlite3.Open("sqlite.db")
 	go use(c1)
 	go use(c2)
 
-If the SQLite shared library was compiled with -DSQLITE_THREADSAFE=0, then all
-mutex code was omitted, and this package is unsafe for concurrent access even to
-separate database connections. Use SingleThread() to determine if this is the
-case. By default, SQLite is compiled with SQLITE_THREADSAFE=1, which enables
-serialized threading mode. This package switches it to 2 (multi-thread) during
-initialization for slightly better performance. See
-http://www.sqlite.org/threadsafe.html for additional information.
-
 Maps
 
-NamedArgs and RowMap types are provided for using maps as statement arguments
-and for query output, respectively. Here is a short usage example with the
+Use NamedArgs map to bind values to named statement parameters (see
+http://www.sqlite.org/lang_expr.html#varparam). Use RowMap to retrieve the
+current row as a map of column/value pairs. Here is a short example with the
 error-handling code omitted for brevity:
 
 	c, _ := sqlite3.Open(":memory:")
 	c.Exec("CREATE TABLE x(a, b, c)")
 
-	args := sqlite3.NamedArgs{"@a": 1, "@b": "demo"}
-	c.Exec("INSERT INTO x VALUES(@a, @b, @c)", args) // @c will be NULL
+	args := sqlite3.NamedArgs{"$a": 1, "$b": "demo"}
+	c.Exec("INSERT INTO x VALUES($a, $b, $c)", args) // $c will be NULL
 
 	sql := "SELECT rowid, * FROM x"
 	row := make(sqlite3.RowMap)
 	for s, err := c.Query(sql); err == nil; err = s.Next() {
 		var rowid int64
-		s.Scan(&rowid, row) // Assign column 0 to rowid, the rest to row
-		fmt.Println(rowid, row)
+		s.Scan(&rowid, row)     // Assigns 1st column to rowid, the rest to row
+		fmt.Println(rowid, row) // Prints "1 map[a:1 b:demo c:<nil>]"
 	}
 
 Data Types
 
-See http://www.sqlite.org/datatype3.html for documentation of the SQLite version
-3 data type system. See http://www.sqlite.org/c3ref/column_blob.html for details
-of how column values are retrieved from the results of a query.
+See http://www.sqlite.org/datatype3.html for a description of the SQLite data
+type system. The following Go data types are supported as arguments to prepared
+statements and may be used in NamedArgs:
 
-The following data types are supported as arguments to prepared statements (and
-may be used in NamedArgs):
+	Go Type    SQLite Type  Notes
+	---------  -----------  ----------------------------------------------------
+	<nil>      NULL         Unbound parameters are NULL by default.
+	int        INTEGER
+	int64      INTEGER
+	float64    FLOAT
+	bool       INTEGER      Converted as false = 0, true = 1.
+	string     TEXT         SQLite makes a private copy when the value is bound.
+	[]byte     BLOB         SQLite makes a private copy when the value is bound.
+	time.Time  INTEGER      Converted by calling Unix().
+	RawString  TEXT         SQLite uses the value directly without copying. The
+	                        caller must keep a reference to the value for the
+	                        duration of the query to prevent garbage collection.
+	RawBytes   BLOB         Same as RawString. The value must not be modified
+	                        for the duration of the query.
+	ZeroBlob   BLOB         Allocates a zero-filled BLOB of the specified length
+	                        (e.g. ZeroBlob(4096) allocates 4KB).
 
-	int
-	int64
-	float64
-	bool      -- Bound as an int: false -> 0, true -> 1.
-	string    -- Bound as a text value. SQLite makes an internal copy.
-	[]byte    -- Bound as a BLOB value. SQLite makes an internal copy.
-	time.Time -- Bound as an int64 after conversion via Unix().
-	RawString -- Bound as a text value referencing Go's copy of the string. The
-	             string must remain valid for the duration of the query.
-	RawBytes  -- Bound as a BLOB value referencing Go's copy of the array. The
-	             array must remain valid and unmodified for the duration of the
-	             query.
-	ZeroBlob  -- Allocates a zero-filled BLOB of the specified length
-	             (e.g. ZeroBlob(4096) allocates 4KB).
+Note that the table above describes how the value is bound to the statement. The
+final storage class is determined according to the column affinity rules.
 
-The following static data types are supported for retrieving column values:
+See http://www.sqlite.org/c3ref/column_blob.html for a description of how column
+values are retrieved from the results of a query. The following static Go data
+types are supported for retrieving column values:
 
-	*int
-	*int64
-	*float64
-	*bool      -- Retrieved as an int64: 0 -> false, else -> true.
-	*string    -- Retrieved as a text value and copied into Go-managed memory.
-	*[]byte    -- Retrieved as a BLOB value and copied into Go-managed memory.
-	*time.Time -- Retrieved as an int64 and converted via time.Unix(). TEXT
-	              values are not supported, but see SQLite's date and time SQL
-	              functions, which can perform the required conversion.
-	*RawString -- Retrieved as a text value and returned as a string pointing
-	              into SQLite's memory. The value remains valid as long as no
-	              other Stmt methods are called.
-	*RawBytes  -- Retrieved as a BLOB value and returned as a []byte pointing
-	              into SQLite's memory. The value remains valid as long as no
-	              other Stmt methods are called and must not be modified
-	              (re-slicing is ok).
-	io.Writer  -- Retrieved as a BLOB value and written out directly from
-	              SQLite's memory into the writer.
+	Go Type     Req. Type  Notes
+	----------  ---------  ---------------------------------------------------
+	*int        INTEGER
+	*int64      INTEGER
+	*float64    FLOAT
+	*bool       INTEGER    Converted as 0 = false, otherwise true.
+	*string     TEXT       The caller receives a copy of the value.
+	*[]byte     BLOB       The caller receives a copy of the value.
+	*time.Time  INTEGER    Converted by calling time.Unix(). Text values are not
+	                       supported, but the conversion can be performed with
+	                       the date and time SQL functions.
+	*RawString  TEXT       The value is used directly without copying and
+	                       remains valid until the next Stmt method call.
+	*RawBytes   BLOB       Same as *RawString. The value must not be modified.
+	                       Re-slicing is ok, but be careful with append().
+	io.Writer   BLOB       The value is written out directly into the writer.
 
-The following rules are used for assigning column values to *interface{} and
-RowMap arguments (dynamic typing). The SQLite's storage class and column
-declaration are used to select the best Go representation:
+For *interface{} and RowMap arguments, the Go data type is dynamically selected
+based on the SQLite storage class and column declaration prefix:
 
-	INTEGER -- Retrieved as an int64. If the column type declaration begins with
-	           "DATE" or "TIME", convert via time.Unix(). If the declaration
-	           begins with "BOOL", return a bool: 0 -> false, else -> true.
-	FLOAT   -- Returned as a float64.
-	TEXT    -- Returned as a string copy.
-	BLOB    -- Returned as a []byte copy.
-	NULL    -- Returned as nil.
+	SQLite Type  Col. Decl.  Go Type    Notes
+	-----------  ----------  ---------  ----------------------------------------
+	NULL                     <nil>
+	INTEGER      "DATE..."   time.Time  Converted by calling time.Unix().
+	INTEGER      "TIME..."   time.Time  Converted by calling time.Unix().
+	INTEGER      "BOOL..."   bool       Converted as 0 = false, otherwise true.
+	INTEGER                  int64
+	FLOAT                    float64
+	TEXT                     string
+	BLOB                     []byte
 
 Database Names
 
-Methods that require a database name as one of the arguments (e.g. Conn.Path)
+Methods that require a database name as one of the arguments (e.g. Conn.Path())
 expect the symbolic name by which the database is known to the connection, not a
 path to a file. Valid database names are "main", "temp", or a name specified
 after the AS keyword in an ATTACH statement.
 
 Callbacks
 
-SQLite allows the user to install callback functions that are executed for
-various internal events (e.g. busy handler and commit/rollback hooks). This
-package defines the function types for these callbacks, which can be installed
-for each Conn object. There are three important things to remember when using
-these callbacks:
-
-1. The callbacks are executed while SQLite is in the middle of a C function (Go
--> C -> Go). They are locked to the current thread, as though
-runtime.LockOSThread() was called, and the Go runtime may have spawned
-additional threads for running other goroutines.
-
-2. The callbacks are not reentrant, meaning that they must not do anything that
-will modify the database connection that invoked the callback. This includes
-running/preparing any other SQL statements. The safest bet is to avoid all
-interactions with Conn, Stmt, and other package objects within these callbacks.
-
-3. Only one callback of each type can be installed for each connection. In
-particular, Conn.BusyTimeout and Conn.BusyFunc are mutually exclusive. Setting
-one clears the other. The former is a built-in busy handler that retries the
-locking operation for the specified amount of time. It should be preferred over
-BusyFunc when no additional logic is needed, since it avoids the transition
-overhead between C and Go.
+SQLite can execute callbacks for various internal events. The package provides
+types and methods for registering callback handlers. Unless stated otherwise in
+SQLite documentation, callback handlers are not reentrant and must not do
+anything to modify the associated database connection. This includes
+preparing/running any other SQL statements. The safest bet is to avoid all
+interactions with Conn, Stmt, and other related objects within the handler.
 */
 package sqlite3

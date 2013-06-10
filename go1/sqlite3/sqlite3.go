@@ -186,8 +186,8 @@ func (c *Conn) Prepare(sql string) (*Stmt, error) {
 // unreferenced names are ignored. The following example is identical to the
 // previous one:
 //
-// 	args := NamedArgs{"@a": 1, "@b": 2}
-// 	c.Exec("UPDATE x SET a=@a; UPDATE x SET b=@b", args)
+// 	args := NamedArgs{"$a": 1, "$b": 2}
+// 	c.Exec("UPDATE x SET a=$a; UPDATE x SET b=$b", args)
 //
 // Without any extra arguments, the statements in sql are executed by a single
 // call to sqlite3_exec.
@@ -1034,8 +1034,8 @@ func namedArgs(args []interface{}) (named NamedArgs) {
 	return
 }
 
-// text returns the value of column i as a string. If copy is false, the string
-// will point to memory allocated by SQLite.
+// text returns the value of column i as a UTF-8 string. If copy is false, the
+// string will point to memory allocated by SQLite.
 func text(stmt *C.sqlite3_stmt, i C.int, copy bool) string {
 	p := (*C.char)(unsafe.Pointer(C.sqlite3_column_text(stmt, i)))
 	if n := C.sqlite3_column_bytes(stmt, i); n > 0 {
