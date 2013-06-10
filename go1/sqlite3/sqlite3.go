@@ -1010,7 +1010,7 @@ func (s *Stmt) scanDynamic(i C.int, v *interface{}, driverValue bool) error {
 		*v = float64(C.sqlite3_column_double(s.stmt, i))
 	case TEXT:
 		if driverValue {
-			*v = blob(s.stmt, i, true)
+			*v = []byte(text(s.stmt, i, false))
 		} else {
 			*v = text(s.stmt, i, true)
 		}
