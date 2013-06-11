@@ -609,7 +609,7 @@ func (s *Stmt) NumColumns() int {
 
 // unnamedVars is assigned to Stmt.varNames if the prepared statement does not
 // use named parameters. It just causes s.varNames == nil to evaluate to false.
-var unnamedVars = []string{}
+var unnamedVars = make([]string, 0, 1)
 
 // Params returns the names of bound parameters in the prepared statement. Nil
 // is returned if the statement does not use named parameters.
@@ -631,7 +631,7 @@ func (s *Stmt) Params() []string {
 		s.varNames = names
 	}
 	if len(s.varNames) == 0 {
-		return nil // unnamedVars != nil
+		return nil
 	}
 	return s.varNames
 }

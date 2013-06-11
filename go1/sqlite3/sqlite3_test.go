@@ -6,80 +6,111 @@ package sqlite3_test
 
 import (
 	"database/sql"
+	"fmt"
 	"io"
 	"reflect"
 	"runtime"
 	"testing"
+	"unsafe"
 
 	. "code.google.com/p/go-sqlite/go1/sqlite3"
 )
 
-// minVersion is the minimum required SQLite version. The package will not build
-// with anything less, so it's only used to check that VersionNum is working.
-const minVersion = 3007014
-
 // skip causes all remaining tests to be skipped when set to true.
 var skip = false
 
-// thisFile is used by close to detect when it is called as a deferred function.
-var thisFile string
+type T struct{ *testing.T }
 
-// Test control functions.
-func checkSkip(t *testing.T) {
+func begin(t *testing.T) T {
 	if skip {
-		t.Fatalf("test skipped")
+		t.SkipNow()
 	}
+	return T{t}
 }
-func skipIfFailed(t *testing.T) {
-	skip = t.Failed()
+func (t T) skipRestIfFailed() {
+	skip = skip || t.Failed()
 }
-
-// Object control functions.
-func open(t *testing.T, name string) *Conn {
+func (t T) open(name string) *Conn {
 	c, err := Open(name)
 	if err != nil || c == nil {
-		t.Fatalf("Open(%q) unexpected error: %v", name, err)
+		t.Fatalf(up(1, "Open(%q) unexpected error: %v"), name, err)
 	}
 	return c
 }
-func close(t *testing.T, c io.Closer) {
-	_, file, line, _ := runtime.Caller(1)
-	if file != thisFile {
-		line = 0 // Called as a deferred function
-	}
+func (t T) close(c io.Closer) {
 	if err := c.Close(); err != nil {
-		t.Fatalf("(%T).Close() [line %d] unexpected error: %v", c, line, err)
+		if !t.Failed() {
+			t.Fatalf(up(1, "(%T).Close() unexpected error: %v"), c, err)
+		}
+		t.FailNow()
 	}
 }
 
-func TestInit(t *testing.T) {
-	defer skipIfFailed(t)
+func up(frame int, s string) string {
+	_, origFile, _, _ := runtime.Caller(1)
+	_, frameFile, frameLine, ok := runtime.Caller(frame + 1)
+	if ok && origFile == frameFile {
+		return fmt.Sprintf("%d: %s", frameLine, s)
+	}
+	return s
+}
+
+func TestBasic(T *testing.T) {
+	t := begin(T)
+	defer t.skipRestIfFailed()
 
 	// Library information
 	if SingleThread() {
-		t.Log("!!!WARNING!!! SQLite was built with -DSQLITE_THREADSAFE=0")
+		t.Fatalf("SQLite was built with -DSQLITE_THREADSAFE=0")
 	}
-	if v := VersionNum(); v < minVersion {
-		t.Fatalf("VersionNum() expected >= %d; got %d", minVersion, v)
+	if v, min := VersionNum(), 3007017; v < min {
+		t.Fatalf("VersionNum() expected >= %d; got %d", min, v)
 	}
 
-	// Open/Close
-	_, thisFile, _, _ = runtime.Caller(0)
-	close(t, open(t, ":memory:"))
-
-	// Check of assumptions for Stmt.Params()
-	unnamedVars := []string{}
-	if unnamedVars == nil {
-		t.Fatalf("unnamedVars == nil")
+	// Setup
+	c := t.open(":memory:")
+	err := c.Exec(`
+		CREATE TABLE t(x, y, z);
+		INSERT INTO t VALUES(NULL, 123, "abc");
+	`)
+	if err != nil {
+		t.Fatalf("c.Exec() unexpected error: %v", err)
 	}
+
+	// Query
+	sql := "SELECT * FROM t"
+	s, err := c.Query(sql)
+	if err != nil || s == nil {
+		t.Fatalf("c.Query() unexpected error: %v", err)
+	}
+
+	// Scan
+	var x interface{}
+	var y int
+	var z string
+	if err = s.Scan(&x, &y, &z); err != nil {
+		t.Fatalf("s.Scan() unexpected error: %v", err)
+	}
+	if x != nil || y != 123 || z != "abc" {
+		t.Fatalf(`s.Scan() expected nil, 123, "abc"; got %v, %d, %q`, x, y, z)
+	}
+
+	// End of scan
+	if err = s.Next(); err != io.EOF {
+		t.Fatalf("s.Next() expected EOF; got %v", err)
+	}
+
+	// Clean up
+	t.close(s)
+	t.close(c)
 }
 
-func TestBasic(t *testing.T) {
-	checkSkip(t)
-	defer skipIfFailed(t)
+func TestInfo(T *testing.T) {
+	t := begin(T)
+	defer t.skipRestIfFailed()
 
-	c := open(t, ":memory:")
-	defer close(t, c)
+	c := t.open(":memory:")
+	defer t.close(c)
 
 	// Connection information
 	if !c.AutoCommit() {
@@ -111,7 +142,7 @@ func TestBasic(t *testing.T) {
 	if err != nil || s == nil {
 		t.Fatalf("c.Query(%q) unexpected error: %v", sql, err)
 	}
-	defer close(t, s)
+	defer t.close(s)
 
 	// Statement information
 	if s.Conn() != c {
@@ -206,7 +237,7 @@ func TestBasic(t *testing.T) {
 	}
 
 	// Close
-	close(t, s)
+	t.close(s)
 	if s.Conn() != c {
 		t.Fatalf("s.Conn() expected %v; got %v", c, s.Conn())
 	}
@@ -215,12 +246,97 @@ func TestBasic(t *testing.T) {
 	}
 }
 
-func TestParams(t *testing.T) {
-	checkSkip(t)
-	defer skipIfFailed(t)
+func TestNull(T *testing.T) {
+	t := begin(T)
+	defer t.skipRestIfFailed()
 
-	c := open(t, ":memory:")
-	defer close(t, c)
+	c := t.open(":memory:")
+	defer t.close(c)
+
+	c.Exec("CREATE TABLE t(text, blob)")
+
+	var text string
+	var blob []byte
+
+	(*reflect.StringHeader)(unsafe.Pointer(&text)).Data = 0
+	(*reflect.SliceHeader)(unsafe.Pointer(&blob)).Data = 0
+
+	sql := "INSERT INTO t VALUES(?, ?)"
+	c.Exec(sql, text, blob)
+
+	(*reflect.StringHeader)(unsafe.Pointer(&text)).Data = 1
+	(*reflect.SliceHeader)(unsafe.Pointer(&blob)).Data = 1
+
+	c.Exec(sql, text, blob)
+
+	s, _ := c.Query("SELECT * FROM t")
+	defer t.close(s)
+
+	want := []byte{TEXT, BLOB}
+	for i := 1; i <= 2; i++ {
+		if have := s.DataTypes(); !reflect.DeepEqual(want, have) {
+			t.Errorf("Row %d expected %v; got %v", i, want, have)
+		}
+		s.Next()
+	}
+}
+
+func TestTail(T *testing.T) {
+	t := begin(T)
+	defer t.skipRestIfFailed()
+
+	c := t.open(":memory:")
+	defer t.close(c)
+
+	head := "CREATE TABLE x(y);"
+	tail := " -- comment"
+	sql := head + tail
+
+	s, err := c.Prepare(head)
+	if err != nil {
+		t.Fatalf("c.Prepare(head) unexpected error: %v", err)
+	}
+	defer t.close(s)
+	if want := ""; want != s.Tail {
+		t.Fatalf("s.Tail expected %q; got %q", want, s.Tail)
+	}
+
+	s, err = c.Prepare(sql)
+	if err != nil {
+		t.Fatalf("c.Prepare(sql) unexpected error: %v", err)
+	}
+	defer t.close(s)
+	if s.String() != head {
+		t.Fatalf("s.String() expected %q; got %q", head, s.String())
+	}
+	if s.Tail != tail {
+		t.Fatalf("s.Tail expected %q; got %q", tail, s.Tail)
+	}
+
+	have := (*reflect.StringHeader)(unsafe.Pointer(&s.Tail)).Data -
+		(*reflect.StringHeader)(unsafe.Pointer(&sql)).Data
+	if want := uintptr(len(head)); have != want {
+		t.Fatalf("s.Tail isn't a pointer into sql")
+	}
+
+	s, err = c.Prepare(s.Tail)
+	if err != nil {
+		t.Fatalf("c.Prepare(s.Tail) unexpected error: %v", err)
+	}
+	if want := ""; want != s.Tail {
+		t.Fatalf("s.Tail expected %q; got %q", want, s.Tail)
+	}
+	if s.Valid() {
+		t.Fatalf("s.Valid() expected false")
+	}
+}
+
+func TestParams(T *testing.T) {
+	t := begin(T)
+	defer t.skipRestIfFailed()
+
+	c := t.open(":memory:")
+	defer t.close(c)
 
 	// Setup
 	sql := `CREATE TABLE x(a, b, c)`
@@ -234,7 +350,7 @@ func TestParams(t *testing.T) {
 	if err != nil || s == nil {
 		t.Fatalf("c.Prepare(%q) unexpected error: %v", sql, err)
 	}
-	defer close(t, s)
+	defer t.close(s)
 
 	// Parameter information
 	if s.NumParams() != 3 {
@@ -269,7 +385,7 @@ func TestParams(t *testing.T) {
 	if err != nil || s == nil {
 		t.Fatalf("c.Prepare(%q) unexpected error: %v", sql, err)
 	}
-	defer close(t, s)
+	defer t.close(s)
 
 	// Parameter information
 	if s.NumParams() != 3 {
@@ -298,7 +414,7 @@ func TestParams(t *testing.T) {
 	if s, err = c.Query(sql); err != nil {
 		t.Fatalf("c.Query() unexpected error: %v", err)
 	}
-	defer close(t, s)
+	defer t.close(s)
 
 	// Verify
 	table := []RowMap{
@@ -326,11 +442,12 @@ func TestParams(t *testing.T) {
 	}
 }
 
-func TestIO(t *testing.T) {
-	checkSkip(t)
+func TestIO(T *testing.T) {
+	t := begin(T)
+	defer t.skipRestIfFailed()
 
-	c := open(t, ":memory:")
-	defer close(t, c)
+	c := t.open(":memory:")
+	defer t.close(c)
 
 	// Setup
 	c.Exec(`CREATE TABLE x(a)`)
@@ -341,7 +458,7 @@ func TestIO(t *testing.T) {
 	if err != nil || b == nil {
 		t.Fatalf("c.BlobIO() unexpected error: %v", err)
 	}
-	defer close(t, b)
+	defer t.close(b)
 
 	// Blob information
 	if b.Row() != 1 {
@@ -388,11 +505,11 @@ func TestIO(t *testing.T) {
 			t.Fatalf("b.Seek() expected 0, <nil>; got %d, %v", p, err)
 		}
 	}
-	close(t, b)
+	t.close(b)
 
 	// Verify
 	s, _ := c.Query("SELECT * FROM x ORDER BY rowid")
-	defer close(t, s)
+	defer t.close(s)
 
 	var have string
 	s.Scan(&have)
@@ -406,12 +523,13 @@ func TestIO(t *testing.T) {
 	}
 }
 
-func TestBackup(t *testing.T) {
-	checkSkip(t)
+func TestBackup(T *testing.T) {
+	t := begin(T)
+	defer t.skipRestIfFailed()
 
-	c1, c2 := open(t, ":memory:"), open(t, ":memory:")
-	defer close(t, c1)
-	defer close(t, c2)
+	c1, c2 := t.open(":memory:"), t.open(":memory:")
+	defer t.close(c1)
+	defer t.close(c2)
 
 	// Setup (c1)
 	c1.Exec(`CREATE TABLE x(a)`)
@@ -423,15 +541,15 @@ func TestBackup(t *testing.T) {
 	if err != nil || b == nil {
 		t.Fatalf("b.Backup() unexpected error: %v", err)
 	}
-	defer close(t, b)
+	defer t.close(b)
 	if err = b.Step(-1); err != io.EOF {
 		t.Fatalf("b.Step(-1) expected EOF; got %v", err)
 	}
-	close(t, b)
+	t.close(b)
 
 	// Verify (c2)
 	s, _ := c2.Query("SELECT * FROM x ORDER BY rowid")
-	defer close(t, s)
+	defer t.close(s)
 
 	var have string
 	s.Scan(&have)
@@ -445,12 +563,12 @@ func TestBackup(t *testing.T) {
 	}
 }
 
-func TestTx(t *testing.T) {
-	checkSkip(t)
-	defer skipIfFailed(t)
+func TestTx(T *testing.T) {
+	t := begin(T)
+	defer t.skipRestIfFailed()
 
-	c := open(t, ":memory:")
-	defer close(t, c)
+	c := t.open(":memory:")
+	defer t.close(c)
 
 	c.Exec(`CREATE TABLE x(a)`)
 
@@ -480,7 +598,7 @@ func TestTx(t *testing.T) {
 
 	// Verify
 	s, _ := c.Query("SELECT * FROM x ORDER BY rowid")
-	defer close(t, s)
+	defer t.close(s)
 
 	var i int
 	if s.Scan(&i); i != 1 {
@@ -495,15 +613,16 @@ func TestTx(t *testing.T) {
 	}
 }
 
-func TestDriver(t *testing.T) {
-	checkSkip(t)
+func TestDriver(T *testing.T) {
+	t := begin(T)
+	defer t.skipRestIfFailed()
 
 	// Open
 	c, err := sql.Open("sqlite3", ":memory:")
 	if err != nil || c == nil {
 		t.Fatalf("sql.Open() unexpected error: %v", err)
 	}
-	defer close(t, c)
+	defer t.close(c)
 
 	// Setup
 	sql := "CREATE TABLE x(a, b, c)"
@@ -524,7 +643,7 @@ func TestDriver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("c.Prepare(%q) unexpected error: %v", sql, err)
 	}
-	defer close(t, s)
+	defer t.close(s)
 
 	// Multiple inserts
 	r, err = s.Exec(1, 2.2, "test")
@@ -555,7 +674,7 @@ func TestDriver(t *testing.T) {
 	if err != nil || rows == nil {
 		t.Fatalf("c.Query() unexpected error: %v", err)
 	}
-	defer close(t, rows)
+	defer t.close(rows)
 
 	// Row information
 	want := []string{"rowid", "a", "b", "c"}
