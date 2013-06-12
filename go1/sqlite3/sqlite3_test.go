@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
 	"reflect"
 	"runtime"
 	"testing"
@@ -16,7 +18,7 @@ import (
 	. "code.google.com/p/go-sqlite/go1/sqlite3"
 )
 
-// skip causes all remaining tests to be skipped when set to true.
+// skip, when set to true, causes all remaining tests to be skipped.
 var skip = false
 
 type T struct{ *testing.T }
@@ -27,30 +29,42 @@ func begin(t *testing.T) T {
 	}
 	return T{t}
 }
+
 func (t T) skipRestIfFailed() {
 	skip = skip || t.Failed()
 }
+
 func (t T) open(name string) *Conn {
 	c, err := Open(name)
 	if err != nil || c == nil {
-		t.Fatalf(up(1, "Open(%q) unexpected error: %v"), name, err)
+		t.Fatalf(up("Open(%q) unexpected error: %v"), name, err)
 	}
 	return c
 }
+
 func (t T) close(c io.Closer) {
 	if err := c.Close(); err != nil {
 		if !t.Failed() {
-			t.Fatalf(up(1, "(%T).Close() unexpected error: %v"), c, err)
+			t.Fatalf(up("(%T).Close() unexpected error: %v"), c, err)
 		}
 		t.FailNow()
 	}
 }
 
-func up(frame int, s string) string {
-	_, origFile, _, _ := runtime.Caller(1)
-	_, frameFile, frameLine, ok := runtime.Caller(frame + 1)
-	if ok && origFile == frameFile {
-		return fmt.Sprintf("%d: %s", frameLine, s)
+func (t T) tmpFile() string {
+	f, err := ioutil.TempFile("", "go-sqlite-")
+	if err != nil {
+		t.Fatalf(up("ioutil.TempFile() unexpected error: %v"), err)
+	}
+	defer f.Close()
+	return f.Name()
+}
+
+func up(s string) string {
+	_, thisFile, _, _ := runtime.Caller(1)
+	_, frameFile, line, ok := runtime.Caller(2)
+	if ok && thisFile == frameFile {
+		return fmt.Sprintf("%d: %s", line, s)
 	}
 	return s
 }
@@ -60,12 +74,18 @@ func TestBasic(T *testing.T) {
 	defer t.skipRestIfFailed()
 
 	// Library information
-	if SingleThread() {
-		t.Fatalf("SQLite was built with -DSQLITE_THREADSAFE=0")
-	}
 	if v, min := VersionNum(), 3007017; v < min {
 		t.Fatalf("VersionNum() expected >= %d; got %d", min, v)
 	}
+	if SingleThread() {
+		t.Fatalf("SQLite was built with -DSQLITE_THREADSAFE=0")
+	}
+
+	// Memory and file open/close
+	t.close(t.open(":memory:"))
+	tmp := t.tmpFile()
+	defer os.Remove(tmp)
+	t.close(t.open(tmp))
 
 	// Setup
 	c := t.open(":memory:")
