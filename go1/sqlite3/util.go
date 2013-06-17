@@ -297,6 +297,11 @@ func Print(s *Stmt) error {
 	return err
 }
 
+// raw casts s to a RawString.
+func raw(s string) RawString {
+	return RawString(s)
+}
+
 // cStr returns a pointer to the first byte in s.
 func cStr(s string) *C.char {
 	h := (*reflect.StringHeader)(unsafe.Pointer(&s))
@@ -360,33 +365,21 @@ func goBytes(p unsafe.Pointer, n C.int) (b []byte) {
 }
 
 //export go_busy_handler
-func go_busy_handler(conn unsafe.Pointer, count C.int) C.int {
-	retry := false
-	if c := (*Conn)(conn); c != nil && c.db != nil && c.busy != nil {
-		retry = c.busy(int(count))
-	}
-	return cBool(retry)
+func go_busy_handler(c unsafe.Pointer, count C.int) (retry C.int) {
+	return cBool((*Conn)(c).busy(int(count)))
 }
 
 //export go_commit_hook
-func go_commit_hook(conn unsafe.Pointer) C.int {
-	abort := false
-	if c := (*Conn)(conn); c != nil && c.db != nil && c.commit != nil {
-		abort = c.commit()
-	}
-	return cBool(abort)
+func go_commit_hook(c unsafe.Pointer) (abort C.int) {
+	return cBool((*Conn)(c).commit())
 }
 
 //export go_rollback_hook
-func go_rollback_hook(conn unsafe.Pointer) {
-	if c := (*Conn)(conn); c != nil && c.db != nil && c.rollback != nil {
-		c.rollback()
-	}
+func go_rollback_hook(c unsafe.Pointer) {
+	(*Conn)(c).rollback()
 }
 
 //export go_update_hook
-func go_update_hook(conn unsafe.Pointer, op C.int, db, tbl *C.char, row C.sqlite3_int64) {
-	if c := (*Conn)(conn); c != nil && c.db != nil && c.update != nil {
-		c.update(int(op), RawString(goStr(db)), RawString(goStr(tbl)), int64(row))
-	}
+func go_update_hook(c unsafe.Pointer, op C.int, db, tbl *C.char, row C.sqlite3_int64) {
+	(*Conn)(c).update(int(op), raw(goStr(db)), raw(goStr(tbl)), int64(row))
 }
