@@ -24,6 +24,9 @@ package sqlite3
 #cgo CFLAGS: -DSQLITE_OMIT_TRACE=1
 #cgo CFLAGS: -DSQLITE_OMIT_UTF16=1
 
+// Fix for BusyTimeout on *nix systems.
+#cgo !windows CFLAGS: -DHAVE_USLEEP=1
+
 // Temporary fix for "fchmod undeclared" error. Seems to cause segmentation
 // faults on Windows (signal 0xc0000005 code=0x8 addr=0x617ee0 pc=0x617ee0).
 // [http://www.sqlite.org/cgi/src/info/61a1045239]
