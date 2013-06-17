@@ -556,15 +556,7 @@ func newStmt(c *Conn, sql string) (*Stmt, error) {
 // [http://www.sqlite.org/c3ref/finalize.html]
 func (s *Stmt) Close() error {
 	if stmt := s.stmt; stmt != nil {
-		// Tail, conn, and text keep their current values
-		s.stmt = nil
-		s.nVars = 0
-		s.nCols = 0
-		s.haveRow = false
-		s.varNames = nil
-		s.colNames = nil
-		s.colDecls = nil
-		s.colTypes = nil
+		*s = Stmt{Tail: s.Tail, conn: s.conn, text: s.text}
 		runtime.SetFinalizer(s, nil)
 		if rc := C.sqlite3_finalize(stmt); rc != OK {
 			return libErr(rc, s.conn.db)
