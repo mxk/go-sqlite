@@ -151,7 +151,7 @@ func Open(name string) (*Conn, error) {
 // [http://www.sqlite.org/c3ref/close.html]
 func (c *Conn) Close() error {
 	if db := c.db; db != nil {
-		*c = Conn{}
+		c.db = nil
 		runtime.SetFinalizer(c, nil)
 		if rc := C.sqlite3_close(db); rc != OK {
 			err := libErr(rc, db)
@@ -160,6 +160,7 @@ func (c *Conn) Close() error {
 			}
 			return err
 		}
+		*c = Conn{} // Clear callback handlers only if db was closed
 	}
 	return nil
 }
@@ -529,8 +530,11 @@ func newStmt(c *Conn, sql string) (*Stmt, error) {
 		runtime.SetFinalizer(s, (*Stmt).Close)
 	}
 	if tail != nil {
-		s.Tail = sql[cStrOffset(zSql, tail):]
+		if n := cStrOffset(zSql, tail); n < len(sql) {
+			sql, s.Tail = sql[:n], sql[n:]
+		}
 	}
+	s.text = sql
 	return s, nil
 }
 
@@ -582,15 +586,9 @@ func (s *Stmt) ReadOnly() bool {
 	return s.stmt == nil || C.sqlite3_stmt_readonly(s.stmt) != 0
 }
 
-// String implements fmt.Stringer by returning the SQL text that was used to
-// create this prepared statement.
+// String returns the SQL text that was used to create this prepared statement.
 // [http://www.sqlite.org/c3ref/sql.html]
 func (s *Stmt) String() string {
-	if s.text == "" && s.stmt != nil {
-		if text := C.sqlite3_sql(s.stmt); text != nil {
-			s.text = C.GoString(text)
-		}
-	}
 	return s.text
 }
 
