@@ -7,7 +7,7 @@ package sqlite3
 /*
 #include "sqlite3.h"
 
-int shell_main(int, void*);
+int shell_main(int,void*);
 */
 import "C"
 
@@ -54,14 +54,23 @@ type (
 	RawBytes  []byte
 )
 
-// Copy returns a Go-owned copy of s.
+// Copy returns a Go-managed copy of s.
 func (s RawString) Copy() string {
+	if s == "" {
+		return ""
+	}
 	h := (*reflect.StringHeader)(unsafe.Pointer(&s))
 	return C.GoStringN((*C.char)(unsafe.Pointer(h.Data)), C.int(h.Len))
 }
 
-// Copy returns a Go-owned copy of b.
+// Copy returns a Go-managed copy of b.
 func (b RawBytes) Copy() []byte {
+	if len(b) == 0 {
+		if b == nil {
+			return nil
+		}
+		return []byte("")
+	}
 	h := (*reflect.SliceHeader)(unsafe.Pointer(&b))
 	return C.GoBytes(unsafe.Pointer(h.Data), C.int(h.Len))
 }
@@ -183,14 +192,13 @@ func ReleaseMemory(n int) int {
 }
 
 // SingleThread returns true if the SQLite library was compiled with
-// -DSQLITE_THREADSAFE=0. With this threading mode, all mutex code is omitted
-// and this package becomes unsafe for concurrent access, even to separate
-// database connections.
+// -DSQLITE_THREADSAFE=0. In this threading mode all mutex code is omitted and
+// the package becomes unsafe for concurrent access, even to separate database
+// connections.
 //
-// This function was needed in Go 1.0 when the package was dynamically linked
-// with the system's SQLite library on *nix. As of Go 1.1, the SQLite
-// amalgamation is compiled into the package with -DSQLITE_THREADSAFE=2, so this
-// function always returns false and is kept only for backward compatibility.
+// The SQLite source that's part of this package is compiled with
+// -DSQLITE_THREADSAFE=2, so this function should always return false. It is
+// kept for backward compatibility when dynamic linking was supported in Go 1.0.
 // [http://www.sqlite.org/threadsafe.html]
 func SingleThread() bool {
 	return initErr == nil && C.sqlite3_threadsafe() == 0
@@ -209,8 +217,7 @@ func SoftHeapLimit(n int64) int64 {
 }
 
 // SourceId returns the check-in identifier of SQLite within its configuration
-// management system (e.g. "2013-01-09 11:53:05
-// c0e09560d26f0a6456be9dd3447f5311eb4f238f").
+// management system.
 // [http://www.sqlite.org/c3ref/c_source_id.html]
 func SourceId() string {
 	if initErr != nil {
@@ -241,7 +248,7 @@ func Version() string {
 	if initErr != nil {
 		return ""
 	}
-	return C.GoString(C.sqlite3_libversion())
+	return goStr(C.sqlite3_libversion())
 }
 
 // VersionNum returns the SQLite version as an integer in the format X*1000000 +
@@ -290,21 +297,19 @@ func Print(s *Stmt) error {
 	return err
 }
 
-// cStr returns a pointer to the first byte in s, which must be a
-// null-terminated string.
+// cStr returns a pointer to the first byte in s.
 func cStr(s string) *C.char {
 	h := (*reflect.StringHeader)(unsafe.Pointer(&s))
 	return (*C.char)(unsafe.Pointer(h.Data))
 }
 
-// cStrOffset returns the offset of p in s, which must be a null-terminated
-// string. It panics if p is not a pointer into s.
+// cStrOffset returns the offset of p in s or -1 if p doesn't point into s.
 func cStrOffset(s string, p *C.char) int {
-	start := (*reflect.StringHeader)(unsafe.Pointer(&s)).Data
-	if n := uintptr(unsafe.Pointer(p)) - start; n < uintptr(len(s)) {
-		return int(n)
+	h := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	if off := uintptr(unsafe.Pointer(p)) - h.Data; off < uintptr(h.Len) {
+		return int(off)
 	}
-	panic("sqlite3: p is not a pointer into s")
+	return -1
 }
 
 // cBytes returns a pointer to the first byte in b.
@@ -312,7 +317,7 @@ func cBytes(b []byte) unsafe.Pointer {
 	return unsafe.Pointer((*reflect.SliceHeader)(unsafe.Pointer(&b)).Data)
 }
 
-// cBool returns an integer representation of a bool (false = 0, true = 1).
+// cBool returns a C representation of a Go bool (false = 0, true = 1).
 func cBool(b bool) C.int {
 	if b {
 		return 1
@@ -320,36 +325,37 @@ func cBool(b bool) C.int {
 	return 0
 }
 
-// goStr returns a Go string representation of a null-terminated C string.
+// goStr returns a Go representation of a null-terminated C string.
 func goStr(p *C.char) (s string) {
-	h := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	h.Data = uintptr(unsafe.Pointer(p))
-	h.Len = int(^uint(0) >> 1)
-	n := 0
-	for s[n] != 0 {
-		n++
+	if p != nil && *p != 0 {
+		h := (*reflect.StringHeader)(unsafe.Pointer(&s))
+		h.Data = uintptr(unsafe.Pointer(p))
+		for *p != 0 {
+			p = (*C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(p)) + 1)) // p++
+		}
+		h.Len = int(uintptr(unsafe.Pointer(p)) - h.Data)
 	}
-	if n == 0 {
-		return "" // Don't keep a pointer to an unused string
-	}
-	h.Len = n
 	return
 }
 
-// goStrN returns a Go string representation of an n-byte C string.
+// goStrN returns a Go representation of an n-byte C string.
 func goStrN(p *C.char, n C.int) (s string) {
-	h := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	h.Data = uintptr(unsafe.Pointer(p))
-	h.Len = int(n)
+	if n > 0 {
+		h := (*reflect.StringHeader)(unsafe.Pointer(&s))
+		h.Data = uintptr(unsafe.Pointer(p))
+		h.Len = int(n)
+	}
 	return
 }
 
-// goBytes returns a []byte representation of an n-byte C array.
+// goBytes returns a Go representation of an n-byte C array.
 func goBytes(p unsafe.Pointer, n C.int) (b []byte) {
-	h := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	h.Data = uintptr(p)
-	h.Len = int(n)
-	h.Cap = int(n)
+	if n > 0 {
+		h := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+		h.Data = uintptr(p)
+		h.Len = int(n)
+		h.Cap = int(n)
+	}
 	return
 }
 
