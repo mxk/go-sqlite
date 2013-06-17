@@ -114,7 +114,7 @@ func init() {
 type Conn struct {
 	db *C.sqlite3
 
-	// Callbacks executed by the exported go_* functions in util.go
+	// Callback handlers executed by the exported go_* functions in util.go
 	busy     BusyFunc
 	commit   CommitFunc
 	rollback RollbackFunc
@@ -326,7 +326,7 @@ func (c *Conn) LastInsertId() int64 {
 
 // RowsAffected returns the number of rows that were changed, inserted, or
 // deleted by the most recent statement. Auxiliary changes caused by triggers or
-// foreign key actions are not included (see Conn.TotalRowsAffected).
+// foreign key actions are not counted.
 // [http://www.sqlite.org/c3ref/changes.html]
 func (c *Conn) RowsAffected() int {
 	if c.db == nil {
@@ -336,8 +336,8 @@ func (c *Conn) RowsAffected() int {
 }
 
 // TotalRowsAffected returns the number of rows that were changed, inserted, or
-// deleted by the most recent statement, including changes caused by triggers or
-// foreign key actions.
+// deleted since the database connection was opened, including changes caused by
+// trigger and foreign key actions.
 // [http://www.sqlite.org/c3ref/total_changes.html]
 func (c *Conn) TotalRowsAffected() int {
 	if c.db == nil {
@@ -392,7 +392,7 @@ func (c *Conn) BusyTimeout(d time.Duration) (prev BusyFunc) {
 		// causes the next call to Conn.BusyTimeout or Conn.BusyFunc to return a
 		// previous handler that wasn't actually being used. This doesn't affect
 		// the operation of SQLite in any way. Use Conn.BusyTimeout instead of
-		// the PRAGMA to avoid this problem if the return value is relevant.
+		// the PRAGMA to avoid this problem if the return value is important.
 		prev, c.busy = c.busy, nil
 		C.sqlite3_busy_timeout(c.db, C.int(d/time.Millisecond))
 	}
