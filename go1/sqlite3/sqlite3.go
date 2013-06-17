@@ -52,6 +52,14 @@ static int bind_blob(sqlite3_stmt *s, int i, const void *p, int n, int copy) {
 	return sqlite3_bind_zeroblob(s, i, 0);
 }
 
+// Faster retrieval of column data types (1 cgo call instead of n).
+static void column_types(sqlite3_stmt *s, unsigned char *p, int n) {
+	int i = 0;
+	for (; i < n; ++i, ++p) {
+		*p = sqlite3_column_type(s, i);
+	}
+}
+
 // Macro for creating callback setter functions.
 #define SET(x) \
 static void set_##x(sqlite3 *db, void *conn, int enable) { \
@@ -489,6 +497,14 @@ func (c *Conn) exec(sql *C.char) error {
 }
 
 // Stmt is a prepared statement handle.
+//
+// SQLite automatically recompiles prepared statements when the database schema
+// changes. A query like "SELECT * FROM x" may return a different number of
+// columns from one execution to the next if the table is altered. The
+// recompilation, if required, only happens at the start of execution (during a
+// call to Exec or Query). Statements that are already running (Busy() == true)
+// are not recompiled. Thus, the safest way of obtaining column information is
+// to call Exec or Query first, followed by NumColumns, Columns, DeclTypes, etc.
 // [http://www.sqlite.org/c3ref/stmt.html]
 type Stmt struct {
 	Tail string // Uncompiled portion of the SQL string passed to Conn.Prepare
@@ -498,13 +514,13 @@ type Stmt struct {
 
 	text    string // SQL text used to create this statement (minus the Tail)
 	nVars   int    // Number of bound parameters (or maximum ?NNN value)
-	nCols   int    // Number of columns in each row
+	nCols   int    // Number of columns in each row (for the current run)
 	haveRow bool   // Flag indicating row availability
 
-	varNames []string // Names of bound parameters (or unnamedVars)
+	varNames []string // Names of bound parameters
 	colNames []string // Names of columns in the result set
 	colDecls []string // Column type declarations in upper case
-	colTypes []byte   // Data type codes for all columns in the current row
+	colTypes []uint8  // Data type codes for all columns in the current row
 }
 
 // newStmt creates a new prepared statement.
@@ -524,9 +540,6 @@ func newStmt(c *Conn, sql string) (*Stmt, error) {
 	if stmt != nil {
 		s.nVars = int(C.sqlite3_bind_parameter_count(stmt))
 		s.nCols = int(C.sqlite3_column_count(stmt))
-		if s.nCols > 0 {
-			s.colTypes = make([]byte, s.nCols)
-		}
 		runtime.SetFinalizer(s, (*Stmt).Close)
 	}
 	if tail != nil {
@@ -638,12 +651,12 @@ func (s *Stmt) Params() []string {
 // Columns returns the names of columns produced by the prepared statement.
 // [http://www.sqlite.org/c3ref/column_name.html]
 func (s *Stmt) Columns() []string {
-	if s.colNames == nil && s.nCols > 0 {
-		names := make([]string, s.nCols)
-		for i := range names {
-			name := C.sqlite3_column_name(s.stmt, C.int(i))
-			if name != nil {
-				names[i] = C.GoString(name)
+	if len(s.colNames) != s.nCols {
+		names := resize(s.colNames, s.nCols)
+		for i, old := range names {
+			new := goStr(C.sqlite3_column_name(s.stmt, C.int(i)))
+			if old != new {
+				names[i] = raw(new).Copy()
 			}
 		}
 		s.colNames = names
@@ -655,12 +668,16 @@ func (s *Stmt) Columns() []string {
 // statement. The type declarations are normalized to upper case.
 // [http://www.sqlite.org/c3ref/column_decltype.html]
 func (s *Stmt) DeclTypes() []string {
-	if s.colDecls == nil && s.nCols > 0 {
-		decls := make([]string, s.nCols)
-		for i := range decls {
-			decl := C.sqlite3_column_decltype(s.stmt, C.int(i))
-			if decl != nil {
-				decls[i] = strings.ToUpper(C.GoString(decl))
+	if len(s.colDecls) != s.nCols {
+		decls := resize(s.colDecls, s.nCols)
+		for i, old := range decls {
+			new := goStr(C.sqlite3_column_decltype(s.stmt, C.int(i)))
+			if !strings.EqualFold(old, new) {
+				norm := strings.ToUpper(new)
+				if cStr(new) == cStr(norm) {
+					norm = raw(norm).Copy() // ToUpper didn't reallocate
+				}
+				decls[i] = norm
 			}
 		}
 		s.colDecls = decls
@@ -670,17 +687,15 @@ func (s *Stmt) DeclTypes() []string {
 
 // DataTypes returns the data type codes of columns in the current row. Possible
 // data types are INTEGER, FLOAT, TEXT, BLOB, and NULL. These represent the
-// actual storage classes used by SQLite to store each value. The returned slice
-// should not be modified.
+// actual storage classes used by SQLite to store each value before any
+// conversion. The returned slice should not be modified.
 // [http://www.sqlite.org/c3ref/column_blob.html]
-func (s *Stmt) DataTypes() []byte {
-	if !s.haveRow {
-		return nil
-	}
-	for i, typ := range s.colTypes {
-		if typ == 0 {
-			s.colTypes[i] = byte(C.sqlite3_column_type(s.stmt, C.int(i)))
+func (s *Stmt) DataTypes() []uint8 {
+	if len(s.colTypes) == 0 {
+		if !s.haveRow || s.nCols == 0 {
+			return nil
 		}
+		s.colType(0)
 	}
 	return s.colTypes
 }
@@ -803,27 +818,33 @@ func (s *Stmt) exec(args []interface{}) (err error) {
 	} else {
 		err = s.bindUnnamed(args)
 	}
-	if err != nil {
-		if s.nVars > 0 {
-			C.sqlite3_clear_bindings(s.stmt)
+	if err == nil {
+		err = s.step()
+		if s.nCols > 0 {
+			// If the statement was recompiled (v2 interface, no indication),
+			// then column counts, names, and declarations may have changed and
+			// need to be reloaded.
+			s.nCols = int(C.sqlite3_column_count(s.stmt))
+			s.colNames = s.colNames[:0]
+			s.colDecls = s.colDecls[:0]
 		}
-		return
+	} else if s.nVars > 0 {
+		C.sqlite3_clear_bindings(s.stmt)
 	}
-	return s.step()
+	return
 }
 
 // bindNamed binds statement parameters using the name/value pairs in args.
 func (s *Stmt) bindNamed(args NamedArgs) error {
-	if s.nVars == 0 {
-		return nil
-	}
-	names := s.Params()
-	if names == nil {
-		return pkgErr(MISUSE, "statement does not accept named arguments")
-	}
-	for i, name := range names {
-		if err := s.bind(C.int(i+1), args[name], name); err != nil {
-			return err
+	if s.nVars > 0 {
+		names := s.Params()
+		if names == nil {
+			return pkgErr(MISUSE, "statement does not accept named arguments")
+		}
+		for i, name := range names {
+			if err := s.bind(C.int(i+1), args[name], name); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -886,13 +907,9 @@ func (s *Stmt) bind(i C.int, v interface{}, name string) error {
 // step evaluates the next step in the statement's program, automatically
 // resetting the statement if the result is anything other than SQLITE_ROW.
 func (s *Stmt) step() error {
+	s.colTypes = s.colTypes[:0]
 	s.haveRow = C.sqlite3_step(s.stmt) == ROW
-	if s.haveRow {
-		// Clear previous data types and reload new ones on demand
-		for i := range s.colTypes {
-			s.colTypes[i] = 0
-		}
-	} else {
+	if !s.haveRow {
 		// If step returned DONE, reset returns OK. Otherwise, reset returns the
 		// same error code as step (v2 interface).
 		rc := C.sqlite3_reset(s.stmt)
@@ -910,12 +927,17 @@ func (s *Stmt) step() error {
 // INTEGER, FLOAT, TEXT, BLOB, or NULL). The value becomes undefined after a
 // type conversion, so this method must be called for column i to cache the
 // original value before using any other sqlite3_column_* functions.
-func (s *Stmt) colType(i C.int) (typ byte) {
-	if typ = s.colTypes[i]; typ == 0 {
-		typ = byte(C.sqlite3_column_type(s.stmt, i))
-		s.colTypes[i] = typ
+func (s *Stmt) colType(i C.int) byte {
+	if len(s.colTypes) == 0 {
+		n := s.nCols
+		if cap(s.colTypes) < n {
+			s.colTypes = make([]uint8, n)
+		} else {
+			s.colTypes = s.colTypes[:n]
+		}
+		C.column_types(s.stmt, (*C.uchar)(cBytes(s.colTypes)), C.int(n))
 	}
-	return
+	return s.colTypes[i]
 }
 
 // scan scans the value of column i (starting at 0) into v.
@@ -1031,6 +1053,16 @@ func namedArgs(args []interface{}) (named NamedArgs) {
 		named, _ = args[0].(NamedArgs)
 	}
 	return
+}
+
+// resize changes len(s) to n, reallocating s if needed.
+func resize(s []string, n int) []string {
+	if n <= cap(s) {
+		return s[:n]
+	}
+	tmp := make([]string, n)
+	copy(tmp, s[:cap(s)])
+	return tmp
 }
 
 // text returns the value of column i as a UTF-8 string. If copy is false, the
