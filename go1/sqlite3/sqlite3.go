@@ -56,7 +56,7 @@ static int bind_blob(sqlite3_stmt *s, int i, const void *p, int n, int copy) {
 }
 
 // Faster retrieval of column data types (1 cgo call instead of n).
-static void column_types(sqlite3_stmt *s, unsigned char *p, int n) {
+static void column_types(sqlite3_stmt *s, unsigned char p[], int n) {
 	int i = 0;
 	for (; i < n; ++i, ++p) {
 		*p = sqlite3_column_type(s, i);
@@ -541,7 +541,9 @@ func newStmt(c *Conn, sql string) (*Stmt, error) {
 	// be useful to the caller, so s is still returned without an error.
 	s := &Stmt{conn: c, stmt: stmt}
 	if stmt != nil {
-		s.nVars = int(C.sqlite3_bind_parameter_count(stmt))
+		if s.nVars = int(C.sqlite3_bind_parameter_count(stmt)); s.nVars == 0 {
+			s.varNames = unnamedVars
+		}
 		s.nCols = int(C.sqlite3_column_count(stmt))
 		runtime.SetFinalizer(s, (*Stmt).Close)
 	}
@@ -622,7 +624,7 @@ var unnamedVars = make([]string, 0, 1)
 // is returned if the statement does not use named parameters.
 // [http://www.sqlite.org/c3ref/bind_parameter_name.html]
 func (s *Stmt) Params() []string {
-	if s.varNames == nil && s.nVars > 0 {
+	if s.varNames == nil {
 		var names []string
 		for i := 0; i < s.nVars; i++ {
 			name := C.sqlite3_bind_parameter_name(s.stmt, C.int(i+1))
@@ -638,7 +640,7 @@ func (s *Stmt) Params() []string {
 		s.varNames = names
 	}
 	if len(s.varNames) == 0 {
-		return nil
+		return nil // unnamedVars -> nil
 	}
 	return s.varNames
 }
@@ -687,7 +689,7 @@ func (s *Stmt) DeclTypes() []string {
 // [http://www.sqlite.org/c3ref/column_blob.html]
 func (s *Stmt) DataTypes() []uint8 {
 	if len(s.colTypes) == 0 {
-		if !s.haveRow || s.nCols == 0 {
+		if !s.haveRow {
 			return nil
 		}
 		s.colType(0)
