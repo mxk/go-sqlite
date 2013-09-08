@@ -3,3 +3,4 @@
 // license that can be found in the LICENSE file.
 
 #include "lib/sqlite3.c"
+#include "lib/codec.c"

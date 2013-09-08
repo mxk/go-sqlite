@@ -14,11 +14,10 @@ database engines.
 Installation
 
 Minimum requirements are Go 1.1+ with CGO enabled and GCC/MinGW C compiler. The
-SQLite amalgamation version 3.7.17 (2013-05-20) is compiled as part of the
+SQLite amalgamation version 3.8.0.2 (2013-09-03) is compiled as part of the
 package (see http://www.sqlite.org/amalgamation.html). Compilation options are
 defined at the top of sqlite3.go (#cgo CFLAGS). Dynamic linking with a shared
-SQLite library is not supported, but send in a feature request if there is a
-good argument for it.
+SQLite library is not supported.
 
 Windows users should install mingw-w64 (http://mingw-w64.sourceforge.net/),
 TDM64-GCC (http://tdm-gcc.tdragon.net/), or another MinGW distribution, and make
@@ -145,5 +144,30 @@ SQLite documentation, callback handlers are not reentrant and must not do
 anything to modify the associated database connection. This includes
 preparing/running any other SQL statements. The safest bet is to avoid all
 interactions with Conn, Stmt, and other related objects within the handler.
+
+Codecs and Encryption
+
+WARNING: Codec support is unstable and is disabled by default. Uncomment "#cgo
+CFLAGS: -DSQLITE_HAS_CODEC=1" in sqlite3.go and rebuild the package to enable
+it.
+
+SQLite has an undocumented codec API to modify database and journal pages as
+they are written to and read from the disk. It operates between the pager and
+the VFS layers. The SQLite Encryption Extension (SEE) uses this API to encrypt
+database contents. Consider purchasing a SEE license if you require
+production-quality encryption support (http://www.hwaci.com/sw/sqlite/see.html).
+
+This package exposes the codec API so that it can be implemented in Go using the
+native crypto/* packages. See the Codec interface and CodecFunc for more
+information. This package does not and will not perform any actual encryption
+itself to avoid introducing crypto dependencies.
+
+A codec cannot be used for memory or temporary databases. Once the database is
+created (after the first CREATE TABLE statement), the page size and the reserved
+space at the end of each page can no longer be changed. Using "PRAGMA
+page_size=N; VACUUM;" will not work. Online backups will fail unless the
+destination database has the same page size and reserve values. Bytes 16 through
+23 of page 1 (the database header) cannot be altered, so it is technically
+possible to identify encrypted SQLite databases.
 */
 package sqlite3

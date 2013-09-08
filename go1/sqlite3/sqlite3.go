@@ -8,8 +8,10 @@ package sqlite3
 // SQLite compilation options.
 // [http://www.sqlite.org/compile.html]
 // [http://www.sqlite.org/footprint.html]
+#cgo CFLAGS: -std=gnu99
 #cgo CFLAGS: -Os
 #cgo CFLAGS: -DNDEBUG=1
+#cgo CFLAGS: -DSQLITE_CORE=1
 #cgo CFLAGS: -DSQLITE_THREADSAFE=2
 #cgo CFLAGS: -DSQLITE_TEMP_STORE=2
 #cgo CFLAGS: -DSQLITE_USE_URI=1
@@ -23,6 +25,7 @@ package sqlite3
 #cgo CFLAGS: -DSQLITE_OMIT_LOAD_EXTENSION=1
 #cgo CFLAGS: -DSQLITE_OMIT_TRACE=1
 #cgo CFLAGS: -DSQLITE_OMIT_UTF16=1
+//#cgo CFLAGS: -DSQLITE_HAS_CODEC=1
 
 // Fix for BusyTimeout on *nix systems.
 #cgo !windows CFLAGS: -DHAVE_USLEEP=1
@@ -58,6 +61,23 @@ static void column_types(sqlite3_stmt *s, unsigned char p[], int n) {
 	}
 }
 
+// Wrappers for sqlite3_key_v2 and sqlite3_rekey_v2 that allow codec support to
+// be disabled.
+static int codec_key(sqlite3 *db, const char *name, const void *p, int n) {
+#ifdef SQLITE_HAS_CODEC
+	return sqlite3_key_v2(db, name, (n > 0 ? p : 0), n);
+#else
+	return -1;
+#endif
+}
+static int codec_rekey(sqlite3 *db, const char *name, const void *p, int n) {
+#ifdef SQLITE_HAS_CODEC
+	return sqlite3_rekey_v2(db, name, (n > 0 ? p : 0), n);
+#else
+	return -1;
+#endif
+}
+
 // Macro for creating callback setter functions.
 #define SET(x) \
 static void set_##x(sqlite3 *db, void *conn, int enable) { \
@@ -89,6 +109,10 @@ import (
 // initErr indicates a SQLite initialization error, which disables this package.
 var initErr error
 
+// dbToConn allows callback functions to map the sqlite3 struct pointer to its
+// Conn instance.
+var dbToConn = make(map[unsafe.Pointer]*Conn)
+
 func init() {
 	// Initialize SQLite (required with SQLITE_OMIT_AUTOINIT).
 	// [http://www.sqlite.org/c3ref/initialize.html]
@@ -112,11 +136,12 @@ func init() {
 type Conn struct {
 	db *C.sqlite3
 
-	// Callback handlers executed by the exported go_* functions in util.go
+	// Callback handlers executed by the exported go_* functions.
 	busy     BusyFunc
 	commit   CommitFunc
 	rollback RollbackFunc
 	update   UpdateFunc
+	codec    CodecFunc
 }
 
 // Open creates a new connection to a SQLite database. The name can be 1) a path
@@ -142,6 +167,7 @@ func Open(name string) (*Conn, error) {
 	}
 
 	c := &Conn{db: db}
+	dbToConn[unsafe.Pointer(db)] = c
 	C.sqlite3_extended_result_codes(db, 1)
 	runtime.SetFinalizer(c, (*Conn).Close)
 	return c, nil
@@ -166,7 +192,9 @@ func (c *Conn) Close() error {
 			}
 			return err
 		}
-		*c = Conn{} // Clear callback handlers only if db was closed
+		// Clear callbacks and remove the db mapping only if db was closed
+		*c = Conn{}
+		delete(dbToConn, unsafe.Pointer(db))
 	}
 	return nil
 }
@@ -444,6 +472,52 @@ func (c *Conn) UpdateFunc(f UpdateFunc) (prev UpdateFunc) {
 		C.set_update_hook(c.db, unsafe.Pointer(c), cBool(f != nil))
 	}
 	return
+}
+
+// CodecFunc registers a function that is invoked by SQLite when a key is
+// provided to an attached database. It returns the previous codec handler, if
+// any.
+func (c *Conn) CodecFunc(f CodecFunc) (prev CodecFunc) {
+	if c.db != nil {
+		prev, c.codec = c.codec, f
+	}
+	return
+}
+
+// CodecKey provides a key to an attached database. This method should be called
+// right after opening the connection and setting the codec handler function.
+func (c *Conn) CodecKey(db string, key []byte) error {
+	if c.db == nil {
+		return ErrBadConn
+	}
+	db += "\x00"
+	rc := C.codec_key(c.db, cStr(db), cBytes(key), C.int(len(key)))
+	if rc != OK {
+		if rc == -1 {
+			return pkgErr(ERROR, "codec support is disabled")
+		}
+		return libErr(rc, c.db)
+	}
+	return nil
+}
+
+// CodecRekey changes the current key for an attached database. The Go API does
+// not implement this feature yet, but it should work with the SQLite Encryption
+// Extension (SEE).
+// [http://www.sqlite.org/see/doc/trunk/www/readme.wiki]
+func (c *Conn) CodecRekey(db string, key []byte) error {
+	if c.db == nil {
+		return ErrBadConn
+	}
+	db += "\x00"
+	rc := C.codec_rekey(c.db, cStr(db), cBytes(key), C.int(len(key)))
+	if rc != OK {
+		if rc == -1 {
+			return pkgErr(ERROR, "codec support is disabled")
+		}
+		return libErr(rc, c.db)
+	}
+	return nil
 }
 
 // Path returns the full file path of an attached database. An empty string is
