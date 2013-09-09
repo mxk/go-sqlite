@@ -5,7 +5,7 @@
 #if defined(SQLITE_AMALGAMATION) && defined(SQLITE_HAS_CODEC)
 
 // codec.go exports.
-void *go_codec_init(void*,const char*,const char*,int,int,const void*,int,int*);
+int go_codec_init(void*,const char*,const char*,int,int,const void*,int,void**,int*);
 void *go_codec_exec(void*,void*,Pgno,int);
 void go_codec_resize(void*,int,int);
 void go_codec_get_key(void*,void**,int*);
@@ -63,24 +63,28 @@ int sqlite3CodecAttach(sqlite3 *db, int iDb, const void *pKey, int nKey) {
 	int rc = SQLITE_OK;
 	Btree *pBt = db->aDb[iDb].pBt;
 	Pager *pPager = sqlite3BtreePager(pBt);
-	const char *zFilename;
+	const char *zPath;
 	const char *zName;
 	int nBuf;
 	int nRes;
-	int nNewRes;
-	void *pCodec;
+	void *pCodec = 0;
+	int nNewRes = 0;
 
 	if (pPager->memDb) {
 		return rc; // SQLite doesn't allow codecs for in-memory databases
 	}
 
-	zFilename = sqlite3BtreeGetFilename(pBt);
+	zPath = sqlite3BtreeGetFilename(pBt);
 	zName = db->aDb[iDb].zName;
 	nBuf = sqlite3BtreeGetPageSize(pBt);
 	nRes = sqlite3BtreeGetReserve(pBt);
-	pCodec = go_codec_init(db, zFilename, zName, nBuf, nRes, pKey, nKey, &nNewRes);
+	rc = go_codec_init(db, zPath, zName, nBuf, nRes, pKey, nKey, &pCodec, &nNewRes);
 
 	if (pCodec != 0) {
+		if (rc != SQLITE_OK) {
+			go_codec_free(pCodec);
+			return rc;
+		}
 		if (nNewRes >= 0 && nNewRes != nRes) {
 			rc = sqlite3BtreeSetPageSize(pBt, -1, nNewRes, 0);
 			if (rc != SQLITE_OK) {

@@ -166,7 +166,7 @@ func Open(name string) (*Conn, error) {
 		return nil, err
 	}
 
-	c := &Conn{db: db}
+	c := &Conn{db: db, codec: defaultCodecFunc}
 	dbToConn[unsafe.Pointer(db)] = c
 	C.sqlite3_extended_result_codes(db, 1)
 	runtime.SetFinalizer(c, (*Conn).Close)
@@ -475,8 +475,9 @@ func (c *Conn) UpdateFunc(f UpdateFunc) (prev UpdateFunc) {
 }
 
 // CodecFunc registers a function that is invoked by SQLite when a key is
-// provided to an attached database. It returns the previous codec handler, if
-// any.
+// provided to an attached database. It returns the previous codec handler. The
+// default handler uses the key prefix to select a codec that was registered
+// with RegisterCodec.
 func (c *Conn) CodecFunc(f CodecFunc) (prev CodecFunc) {
 	if c.db != nil {
 		prev, c.codec = c.codec, f
@@ -485,7 +486,8 @@ func (c *Conn) CodecFunc(f CodecFunc) (prev CodecFunc) {
 }
 
 // CodecKey provides a key to an attached database. This method should be called
-// right after opening the connection and setting the codec handler function.
+// right after opening the connection and optionally replacing the default
+// CodecFunc.
 func (c *Conn) CodecKey(db string, key []byte) error {
 	if c.db == nil {
 		return ErrBadConn
