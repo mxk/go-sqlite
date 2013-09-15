@@ -91,3 +91,40 @@ func wipe(b []byte) {
 		b[i] = 0
 	}
 }
+
+// suiteId constructs a canonical cipher suite identifier.
+type suiteId struct {
+	Cipher  string
+	KeySize string
+	Mode    string
+	MAC     string
+	Hash    string
+	Trunc   string
+}
+
+func (s *suiteId) Id() []byte {
+	id := make([]byte, 0, 64)
+	section := func(parts ...string) {
+		for i, p := range parts {
+			if p != "" {
+				parts = parts[i:]
+				goto write
+			}
+		}
+		return
+	write:
+		if len(id) > 0 {
+			id = append(id, ',')
+		}
+		id = append(id, parts[0]...)
+		for _, p := range parts[1:] {
+			if p != "" {
+				id = append(id, '-')
+				id = append(id, p...)
+			}
+		}
+	}
+	section(s.Cipher, s.KeySize, s.Mode)
+	section(s.MAC, s.Hash, s.Trunc)
+	return id
+}

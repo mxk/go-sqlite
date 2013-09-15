@@ -83,3 +83,46 @@ func TestHKDF(t *testing.T) {
 		}
 	}
 }
+
+func TestSuiteId(t *testing.T) {
+	tests := []struct {
+		suite suiteId
+		out   string
+	}{
+		{suiteId{},
+			""},
+		{suiteId{Cipher: "aes"},
+			"aes"},
+		{suiteId{KeySize: "128"},
+			"128"},
+		{suiteId{Cipher: "aes", KeySize: "128"},
+			"aes-128"},
+		{suiteId{Cipher: "aes", Mode: "ctr"},
+			"aes-ctr"},
+		{suiteId{Cipher: "aes", KeySize: "128", Mode: "ctr"},
+			"aes-128-ctr"},
+		{suiteId{MAC: "hmac"},
+			"hmac"},
+		{suiteId{MAC: "hmac", Hash: "sha1"},
+			"hmac-sha1"},
+		{suiteId{MAC: "hmac", Hash: "sha1", Trunc: "128"},
+			"hmac-sha1-128"},
+		{suiteId{Cipher: "aes", MAC: "hmac"},
+			"aes,hmac"},
+		{suiteId{Cipher: "aes", Hash: "sha1"},
+			"aes,sha1"},
+		{suiteId{Mode: "ctr", Hash: "sha1"},
+			"ctr,sha1"},
+		{suiteId{Cipher: "aes", KeySize: "128", MAC: "hmac", Hash: "sha256"},
+			"aes-128,hmac-sha256"},
+		{suiteId{Cipher: "aes", Mode: "ctr", Hash: "sha256", Trunc: "128"},
+			"aes-ctr,sha256-128"},
+		{suiteId{Cipher: "aes", KeySize: "256", Mode: "ctr", MAC: "hmac", Hash: "sha256", Trunc: "128"},
+			"aes-256-ctr,hmac-sha256-128"},
+	}
+	for _, test := range tests {
+		if out := string(test.suite.Id()); out != test.out {
+			t.Errorf("%#v expected %q; got %q", test.suite, test.out, out)
+		}
+	}
+}

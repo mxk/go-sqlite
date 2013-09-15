@@ -14,8 +14,10 @@ or the KEY clause in an ATTACH statement, to use one of the codecs:
 	c.Key("main", []byte("aes-hmac::secretkey1"))
 	c.Exec("ATTACH DATABASE 'file2.db' AS two KEY 'aes-hmac::secretkey2'")
 
-If the KEY clause is omitted, the key from the main database is used. Specify an
-empty string as the key to disable the codec.
+If the KEY clause is omitted, SQLite uses the key from the main database, which
+may no longer be valid depending on how the codec is implemented (e.g. aes-hmac
+destroys the master key after initialization). Specify an empty string as the
+key to disable this behavior.
 
 Codec Operation
 
@@ -44,7 +46,7 @@ resources when the database is detached.
 
 AES-HMAC
 
-The "aes-hmac" codec provides authenticated encryption using the Advanced
+The aes-hmac codec provides authenticated encryption using the Advanced
 Encryption Standard (AES) cipher and the Hash-based Message Authentication Code
 (HMAC) in Encrypt-then-MAC mode. Each page has an independent, pseudorandom IV,
 which is regenerated every time the page is encrypted, and an authentication
@@ -57,21 +59,21 @@ key from which separate encryption and authentication keys are derived.
 
 SECURITY WARNING: The master key is called a "key" and not a "password" for a
 reason. It is not passed through pbkdf2, bcrypt, scrypt, or any other key
-stretching function. The application is expected to ensure that the key is
-sufficiently resistant to brute-force attacks. Ideally, the master key should be
-obtained from a cryptographically secure pseudorandom number generator (CSPRNG),
-such as the one provided by the crypto/rand package.
+stretching function. The application is expected to ensure that this key is
+sufficiently resistant to brute-force attacks. Ideally, it should be obtained
+from a cryptographically secure pseudorandom number generator (CSPRNG), such as
+the one provided by the crypto/rand package.
 
 The encryption and authentication keys are derived from the master key using the
-HMAC-based Key Derivation Function (HKDF), as described in RFC 5869. The salt
-value is "go-sqlite" extended with NULLs to HashLen bytes, and info the codec
-configuration string, such as "aes-128-ctr,hmac-sha1-128". Once again, this is
-done to obtain two keys of the required lengths and not to protect the master
-key.
+HMAC-based Key Derivation Function (HKDF), as described in RFC 5869. The salt is
+the codec name ("aes-hmac") extended with NULLs to HashLen bytes, and info is
+the codec configuration string (e.g. "aes-128-ctr,hmac-sha1-128"). This is done
+to obtain two keys of the required lengths, which are also bound to the codec
+configuration.
 
 The default configuration is AES-128-CTR cipher and HMAC-SHA1-128 authentication
-(HMAC output truncated to 128 bits). The following options may be used to change
-this configuration:
+(HMAC output is truncated to 128 bits). The following options may be used to
+change the defaults:
 
 	192
 		AES-192 block cipher.
@@ -87,13 +89,13 @@ cipher and HMAC-SHA256-128 authentication.
 
 HEXDUMP
 
-The "hexdump" codec logs all method calls and dumps the page content for each
+The hexdump codec logs all method calls and dumps the page content for each
 encode/decode operation to a file. It is intended to be used as an aid when
 writing your own codecs.
 
 The key format is "hexdump:<options>:<file>", where <options> is a
 comma-separated list of codec options described below, and <file> is the output
-destination. The default destination is stderr and dash ("-") means stdout. For
+destination. The default destination is stderr. Dash ("-") means stdout. For
 obvious reasons, this codec cannot be used with an encrypted database except to
 see the first Codec.Decode call for page 1.
 
