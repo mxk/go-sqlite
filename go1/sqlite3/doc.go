@@ -134,7 +134,7 @@ Database Names
 Methods that require a database name as one of the arguments (e.g. Conn.Path())
 expect the symbolic name by which the database is known to the connection, not a
 path to a file. Valid database names are "main", "temp", or a name specified
-after the AS keyword in an ATTACH statement.
+after the AS clause in an ATTACH statement.
 
 Callbacks
 
@@ -147,27 +147,30 @@ interactions with Conn, Stmt, and other related objects within the handler.
 
 Codecs and Encryption
 
-WARNING: Codec support is unstable and is disabled by default. Uncomment "#cgo
-CFLAGS: -DSQLITE_HAS_CODEC=1" in sqlite3.go and rebuild the package to enable
-it.
-
-SQLite has an undocumented codec API to modify database and journal pages as
-they are written to and read from the disk. It operates between the pager and
-the VFS layers. The SQLite Encryption Extension (SEE) uses this API to encrypt
-database contents. Consider purchasing a SEE license if you require
+SQLite has an undocumented codec API, which operates between the pager and VFS
+layers, and is used by the SQLite Encryption Extension (SEE) to encrypt database
+and journal contents. Consider purchasing a SEE license if you require
 production-quality encryption support (http://www.hwaci.com/sw/sqlite/see.html).
 
-This package exposes the codec API so that it can be implemented in Go using the
-native crypto/* packages. See the Codec interface and CodecFunc for more
-information. This package does not and will not perform any actual encryption
-itself to avoid introducing crypto dependencies.
+This package has an experimental API (read: unstable, may eat your data) for
+writing codecs in Go. The "codec" subpackage provides additional documentation
+and several existing codec implementations.
 
-A codec cannot be used for memory or temporary databases. Once the database is
-created (after the first CREATE TABLE statement), the page size and the reserved
-space at the end of each page can no longer be changed. Using "PRAGMA
-page_size=N; VACUUM;" will not work. Online backups will fail unless the
+Codecs are registered via the RegisterCodec function for a specific key prefix.
+For example, the "aes-hmac" codec is initialized when a key in the format
+"aes-hmac:<...>" is provided to an attached database. The key format after the
+first colon is codec-specific. See CodecFunc for more information.
+
+The codec API has several limitations. Codecs cannot be used for in-memory or
+temporary databases. Once a database is created, the page size and the amount of
+reserved space at the end of each page cannot be changed (i.e. "PRAGMA
+page_size=N; VACUUM;" will not work). Online backups will fail unless the
 destination database has the same page size and reserve values. Bytes 16 through
-23 of page 1 (the database header) cannot be altered, so it is technically
-possible to identify encrypted SQLite databases.
+23 of page 1 (the database header, see http://www.sqlite.org/fileformat2.html)
+cannot be altered, so it is always possible to identify encrypted SQLite
+databases.
+
+The rekey function is currently not implemented. The key can only be changed via
+the backup API or by dumping and restoring the database contents.
 */
 package sqlite3

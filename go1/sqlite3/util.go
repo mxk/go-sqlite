@@ -104,6 +104,12 @@ type Error struct {
 	msg string
 }
 
+// NewError creates a new Error instance using the specified SQLite result code
+// and error message.
+func NewError(rc int, msg string) *Error {
+	return &Error{rc, msg}
+}
+
 // libErr reports an error originating in SQLite. The error message is obtained
 // from the database connection when possible, which may include some additional
 // information. Otherwise, the result code is translated to a generic message.

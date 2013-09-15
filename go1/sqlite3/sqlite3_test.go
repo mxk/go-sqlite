@@ -7,6 +7,7 @@ package sqlite3_test
 import (
 	"bytes"
 	"database/sql"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -21,6 +22,8 @@ import (
 
 	. "code.google.com/p/go-sqlite/go1/sqlite3"
 )
+
+var key = flag.String("key", "", "codec key to use for all tests")
 
 // skip, when set to true, causes all remaining tests to be skipped.
 var skip = false
@@ -39,15 +42,30 @@ func (t T) skipRestIfFailed() {
 }
 
 func (t T) open(name string) *Conn {
+	codec := false
+	if *key != "" && name == ":memory:" {
+		name = t.tmpFile()
+		codec = true
+	}
 	c, err := Open(name)
 	if c == nil || err != nil {
 		t.Fatalf(cl("Open(%q) unexpected error: %v"), name, err)
+	}
+	if codec {
+		if err = c.Key("main", []byte(*key)); err != nil {
+			t.Fatalf(cl("Key() unexpected error: %v"), err)
+		}
 	}
 	return c
 }
 
 func (t T) close(c io.Closer) {
 	if c != nil {
+		if db, _ := c.(*Conn); db != nil {
+			if path := db.Path("main"); path != "" {
+				defer os.Remove(path)
+			}
+		}
 		if err := c.Close(); err != nil {
 			if !t.Failed() {
 				t.Fatalf(cl("(%T).Close() unexpected error: %v"), c, err)
@@ -115,7 +133,7 @@ func (t T) next(s *Stmt, want error) {
 }
 
 func (t T) tmpFile() string {
-	f, err := ioutil.TempFile("", "sqlite3_test_")
+	f, err := ioutil.TempFile("", "go-sqlite.db.")
 	if err != nil {
 		t.Fatalf(cl("tmpFile() unexpected error: %v"), err)
 	}
@@ -177,7 +195,6 @@ func TestCreate(T *testing.T) {
 	}
 	sql := "CREATE TABLE x(a); INSERT INTO x VALUES(1);"
 	tmp := t.tmpFile()
-	defer os.Remove(tmp)
 
 	// File
 	os.Remove(tmp)
@@ -185,7 +202,9 @@ func TestCreate(T *testing.T) {
 	defer t.close(c)
 	checkPath(c, "main", tmp)
 	t.exec(c, sql)
-	t.close(c)
+	if err := c.Close(); err != nil {
+		t.Fatalf("c.Close() unexpected error: %v", err)
+	}
 	if err := c.Exec(sql); err != ErrBadConn {
 		t.Fatalf("c.Exec() expected %v; got %v", ErrBadConn, err)
 	}
@@ -201,10 +220,12 @@ func TestCreate(T *testing.T) {
 	t.exec(c, "INSERT INTO x VALUES(2)")
 
 	// Temporary (in-memory)
-	c = t.open(":memory:")
-	defer t.close(c)
-	checkPath(c, "main", "")
-	t.exec(c, sql)
+	if *key == "" {
+		c = t.open(":memory:")
+		defer t.close(c)
+		checkPath(c, "main", "")
+		t.exec(c, sql)
+	}
 
 	// Temporary (file)
 	c = t.open("")
@@ -1004,7 +1025,6 @@ func TestBusyHandler(T *testing.T) {
 	t := begin(T)
 
 	tmp := t.tmpFile()
-	defer os.Remove(tmp)
 	c1 := t.open(tmp)
 	defer t.close(c1)
 	c2 := t.open(tmp)

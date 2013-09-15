@@ -25,7 +25,7 @@ package sqlite3
 #cgo CFLAGS: -DSQLITE_OMIT_LOAD_EXTENSION=1
 #cgo CFLAGS: -DSQLITE_OMIT_TRACE=1
 #cgo CFLAGS: -DSQLITE_OMIT_UTF16=1
-//#cgo CFLAGS: -DSQLITE_HAS_CODEC=1
+#cgo CFLAGS: -DSQLITE_HAS_CODEC=1
 
 // Fix for BusyTimeout on *nix systems.
 #cgo !windows CFLAGS: -DHAVE_USLEEP=1
@@ -109,10 +109,6 @@ import (
 // initErr indicates a SQLite initialization error, which disables this package.
 var initErr error
 
-// dbToConn allows callback functions to map the sqlite3 struct pointer to its
-// Conn instance.
-var dbToConn = make(map[unsafe.Pointer]*Conn)
-
 func init() {
 	// Initialize SQLite (required with SQLITE_OMIT_AUTOINIT).
 	// [http://www.sqlite.org/c3ref/initialize.html]
@@ -141,7 +137,6 @@ type Conn struct {
 	commit   CommitFunc
 	rollback RollbackFunc
 	update   UpdateFunc
-	codec    CodecFunc
 }
 
 // Open creates a new connection to a SQLite database. The name can be 1) a path
@@ -165,9 +160,7 @@ func Open(name string) (*Conn, error) {
 		C.sqlite3_close(db)
 		return nil, err
 	}
-
-	c := &Conn{db: db, codec: defaultCodecFunc}
-	dbToConn[unsafe.Pointer(db)] = c
+	c := &Conn{db: db}
 	C.sqlite3_extended_result_codes(db, 1)
 	runtime.SetFinalizer(c, (*Conn).Close)
 	return c, nil
@@ -192,9 +185,7 @@ func (c *Conn) Close() error {
 			}
 			return err
 		}
-		// Clear callbacks and remove the db mapping only if db was closed
-		*c = Conn{}
-		delete(dbToConn, unsafe.Pointer(db))
+		*c = Conn{} // Clear callback handlers only if db was closed
 	}
 	return nil
 }
@@ -474,21 +465,9 @@ func (c *Conn) UpdateFunc(f UpdateFunc) (prev UpdateFunc) {
 	return
 }
 
-// CodecFunc registers a function that is invoked by SQLite when a key is
-// provided to an attached database. It returns the previous codec handler. The
-// default handler uses the key prefix to select a codec that was registered
-// with RegisterCodec.
-func (c *Conn) CodecFunc(f CodecFunc) (prev CodecFunc) {
-	if c.db != nil {
-		prev, c.codec = c.codec, f
-	}
-	return
-}
-
-// CodecKey provides a key to an attached database. This method should be called
-// right after opening the connection and optionally replacing the default
-// CodecFunc.
-func (c *Conn) CodecKey(db string, key []byte) error {
+// Key provides a codec key to an attached database. This method should be
+// called right after opening the connection.
+func (c *Conn) Key(db string, key []byte) error {
 	if c.db == nil {
 		return ErrBadConn
 	}
@@ -503,11 +482,9 @@ func (c *Conn) CodecKey(db string, key []byte) error {
 	return nil
 }
 
-// CodecRekey changes the current key for an attached database. The Go API does
-// not implement this feature yet, but it should work with the SQLite Encryption
-// Extension (SEE).
-// [http://www.sqlite.org/see/doc/trunk/www/readme.wiki]
-func (c *Conn) CodecRekey(db string, key []byte) error {
+// Rekey changes the codec key for an attached database. This is not currently
+// implemented for Go codecs.
+func (c *Conn) Rekey(db string, key []byte) error {
 	if c.db == nil {
 		return ErrBadConn
 	}
