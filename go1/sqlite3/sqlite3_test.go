@@ -21,6 +21,7 @@ import (
 	"unsafe"
 
 	. "code.google.com/p/go-sqlite/go1/sqlite3"
+	_ "code.google.com/p/go-sqlite/go1/sqlite3/codec"
 )
 
 var key = flag.String("key", "", "codec key to use for all tests")
