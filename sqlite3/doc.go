@@ -14,7 +14,7 @@ database engines.
 Installation
 
 Minimum requirements are Go 1.1+ with CGO enabled and GCC/MinGW C compiler. The
-SQLite amalgamation version 3.8.0.2 (2013-09-03) is compiled as part of the
+SQLite amalgamation version 3.8.4.3 (2014-04-03) is compiled as part of the
 package (see http://www.sqlite.org/amalgamation.html). Compilation options are
 defined at the top of sqlite3.go (#cgo CFLAGS). Dynamic linking with a shared
 SQLite library is not supported.
