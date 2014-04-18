@@ -23,8 +23,8 @@ Windows users should install mingw-w64 (http://mingw-w64.sourceforge.net/),
 TDM64-GCC (http://tdm-gcc.tdragon.net/), or another MinGW distribution, and make
 sure that gcc.exe is available from the %PATH%. MSYS is not required.
 
-Run 'go get code.google.com/p/go-sqlite/go1/sqlite3' to download, build, and
-install the package.
+Run 'go get github.com/mxk/go-sqlite/sqlite3' to download, build, and install
+the package.
 
 Concurrency
 

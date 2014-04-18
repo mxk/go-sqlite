@@ -20,8 +20,8 @@ import (
 	"time"
 	"unsafe"
 
-	. "code.google.com/p/go-sqlite/go1/sqlite3"
-	_ "code.google.com/p/go-sqlite/go1/sqlite3/codec"
+	. "github.com/mxk/go-sqlite/sqlite3"
+	_ "github.com/mxk/go-sqlite/sqlite3/codec"
 )
 
 var key = flag.String("key", "", "codec key to use for all tests")
