@@ -30,6 +30,9 @@ package sqlite3
 // Fix for BusyTimeout on *nix systems.
 #cgo !windows CFLAGS: -DHAVE_USLEEP=1
 
+// Fix "_localtime32(0): not defined" linker error.
+#cgo windows,386 CFLAGS: -D_localtime32=localtime
+
 #include "sqlite3.h"
 
 // cgo doesn't handle variadic functions.
