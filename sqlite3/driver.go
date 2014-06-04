@@ -17,7 +17,7 @@ import (
 
 // Driver implements the interface required by database/sql.
 type Driver struct {
-	ConnectCallback func(c *Conn)
+	ConnectCallback func(c *Conn) error
 }
 
 func register(name string) {
@@ -32,7 +32,9 @@ func (d *Driver) Open(name string) (driver.Conn, error) {
 	}
 	c.BusyTimeout(5 * time.Second)
 	if d.ConnectCallback != nil {
-		d.ConnectCallback(c)
+		if err := d.ConnectCallback(c); err != nil {
+			return nil, err
+		}
 	}
 	return &conn{c}, nil
 }
