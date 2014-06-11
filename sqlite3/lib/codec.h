@@ -6,7 +6,7 @@
 #define _CODEC_H_
 
 // Codec initialization context.
-typedef struct {
+typedef struct CodecCtx {
 	sqlite3 *db;
 	const char *zPath;
 	const char *zName;
