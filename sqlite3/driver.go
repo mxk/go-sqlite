@@ -16,19 +16,26 @@ import (
 )
 
 // Driver implements the interface required by database/sql.
-type Driver string
+type Driver struct {
+	ConnectCallback func(c *Conn) error
+}
 
 func register(name string) {
 	defer func() { recover() }()
-	sql.Register(name, Driver(name))
+	sql.Register(name, &Driver{nil})
 }
 
-func (Driver) Open(name string) (driver.Conn, error) {
+func (d *Driver) Open(name string) (driver.Conn, error) {
 	c, err := Open(name)
 	if err != nil {
 		return nil, err
 	}
 	c.BusyTimeout(5 * time.Second)
+	if d.ConnectCallback != nil {
+		if err := d.ConnectCallback(c); err != nil {
+			return nil, err
+		}
+	}
 	return &conn{c}, nil
 }
 
